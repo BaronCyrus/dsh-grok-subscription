@@ -18,6 +18,41 @@ test('status RPC never returns tokens to the browser', async () => {
   assert.equal(result.value.catalog.models[0].id, 'grok-4.7')
 })
 
+test('status RPC carries adapter diagnostics without leaking secrets', async () => {
+  const handler = createRpcHandler({
+    status: async () => ({
+      account: { signedIn: true, maskedAccount: 'a•••e@example.com' },
+      catalog: { source: 'live', models: [] },
+      accessToken: 'SHOULD-NOT-LEAK',
+    }),
+  }, {
+    diagnostics: () => ({
+      adapter: 'fallback',
+      adapterKind: 'custom-mvp',
+      imageInput: true,
+      hostPeersResolved: false,
+    }),
+  })
+  const result = await handler('status', {}, undefined)
+  assert.equal(result.ok, true)
+  assert.deepEqual(result.value.diagnostics, {
+    adapter: 'fallback',
+    adapterKind: 'custom-mvp',
+    imageInput: true,
+    hostPeersResolved: false,
+  })
+  assert.equal(result.value.accessToken, undefined)
+})
+
+test('status RPC omits diagnostics when the plugin supplies none', async () => {
+  const handler = createRpcHandler({
+    status: async () => ({ account: { signedIn: false }, catalog: { source: 'signed-out', models: [] } }),
+  })
+  const result = await handler('status', {}, undefined)
+  assert.equal(result.ok, true)
+  assert.equal(result.value.diagnostics, undefined)
+})
+
 test('usage RPC never returns tokens and sanitizes usage', async () => {
   const handler = createRpcHandler({
     usage: () => ({

@@ -106,6 +106,26 @@ function Chip({ tone = 'off', children }) {
   return <span className={`gsChip gsChip--${tone}`}><span className="gsDot" />{children}</span>
 }
 
+export function DiagnosticsRows({ diagnostics, t }) {
+  if (!diagnostics) return null
+  return (
+    <div className="gsRows">
+      <div className="gsRow">
+        <span>{t('diagnostics')}</span>
+        <span className="gsRowValue">
+          {diagnostics.adapter === 'pi-ai' ? t('adapterPiAi') : t('adapterFallback')}
+        </span>
+      </div>
+      <div className="gsRow">
+        <span>{t('imageInput')}</span>
+        <span className="gsRowValue">
+          {diagnostics.imageInput ? t('imageInputOn') : t('imageInputOff')}
+        </span>
+      </div>
+    </div>
+  )
+}
+
 function UsagePanel({ usage, t, usageBusy, onRefresh, signedIn }) {
   const ok = usage?.status === 'ok'
   const usedNumber = ok && Number.isFinite(usage.usedPercent) ? usage.usedPercent : undefined
@@ -315,6 +335,10 @@ export function GrokSubscriptionSection({ rpc, t }) {
         {notice ? <p className="gsStatus gsStatus--ok">{notice}</p> : null}
         {error ? <p className="gsStatus gsStatus--error">{t('error')}: {error}</p> : null}
         {status?.cliAvailable === false ? <p className="gsStatus gsStatus--warn">{t('cliMissing')}</p> : null}
+        <DiagnosticsRows diagnostics={status?.diagnostics} t={t} />
+        {status?.diagnostics && !status.diagnostics.imageInput
+          ? <p className="gsHint">{t('adapterHint')}</p>
+          : null}
         <details className="gsDisclosure">
           <summary><Chevron />{t('loginHelp')}</summary>
           <div className="gsDisclosureBody">

@@ -168,10 +168,33 @@ test('gauge width stays within 0-100 for out-of-range values', () => {
   assert.match(renderUsage({ status: 'ok', remainingPercent: -20 }), /style="width:0%"/)
 })
 
+test('diagnostics rows report the active adapter and image capability', () => {
+  const render2 = diagnostics => renderToStaticMarkup(
+    React.createElement(panel.DiagnosticsRows, { diagnostics, t }),
+  )
+  assert.equal(render2(undefined), '', 'nothing is shown when the host sends no diagnostics')
+
+  const piAi = render2({ adapter: 'pi-ai', imageInput: true })
+  assert.match(piAi, /«adapterPiAi»/)
+  assert.match(piAi, /«imageInputOn»/)
+
+  const fallback = render2({ adapter: 'fallback', imageInput: false })
+  assert.match(fallback, /«adapterFallback»/)
+  assert.match(fallback, /«imageInputOff»/, 'the capability row must be honest about the fallback')
+
+  // Missing or unexpected shapes must not crash the panel.
+  for (const shape of [{}, { adapter: 'unknown' }, { imageInput: true }, { adapter: null, imageInput: null }]) {
+    assert.doesNotThrow(() => render2(shape), `diagnostics ${JSON.stringify(shape)} must render`)
+  }
+})
+
 test('both locales are reachable from the panel copy', () => {
   assert.ok(zh.renderError && en.renderError)
   assert.ok(zh.refreshCatalog && en.refreshCatalog)
   assert.ok(zh.loginHelp && en.loginHelp)
+  assert.ok(zh.diagnostics && en.diagnostics)
+  assert.ok(zh.imageInput && en.imageInput)
+  assert.ok(zh.adapterHint && en.adapterHint)
 })
 
 test('the shipped bundle is not stale relative to src', () => {

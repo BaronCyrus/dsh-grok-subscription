@@ -58,6 +58,21 @@ export function hostModuleRoots(env = process.env, argv1 = process.argv[1]) {
   }
   const prefix = env.NPM_CONFIG_PREFIX
   if (typeof prefix === 'string' && prefix.trim()) push(join(prefix.trim(), 'lib', 'node_modules'))
+  // The Node that runs the host also locates a global npm tree: Homebrew
+  // (/opt/homebrew/lib/node_modules), Intel Homebrew and distro packages
+  // (/usr/local/lib/node_modules), and nvm (~/.nvm/versions/node/vX/lib/node_modules).
+  if (typeof process.execPath === 'string' && process.execPath) {
+    push(join(dirname(process.execPath), '..', 'lib', 'node_modules'))
+  }
+  push(join('/opt/homebrew', 'lib', 'node_modules'))
+  push(join('/usr/local', 'lib', 'node_modules'))
+  for (const segment of ['Library/pnpm', '.local/share/pnpm', '.pnpm-global']) {
+    push(join(homedir(), segment, 'node_modules'))
+  }
+  // Portable/bundled distributions that keep the harness beside the app data.
+  if (typeof env.DSH_PORTABLE_HOME === 'string' && env.DSH_PORTABLE_HOME.trim()) {
+    push(join(env.DSH_PORTABLE_HOME.trim(), 'node_modules'))
+  }
   push(join(homedir(), '.local', 'lib', 'node_modules'))
   const dshHome = typeof env.DSH_HOME === 'string' && env.DSH_HOME.trim()
     ? env.DSH_HOME.trim()
@@ -121,8 +136,15 @@ function resolveExportsTarget(exportsField, subpath) {
 function resolveHostSpecifierManually(root, specifier) {
   const { name, subpath } = splitSpecifier(specifier)
   // Roots are normally `node_modules` directories, but an override may point at
-  // a project root, so accept both shapes.
-  for (const pkgDir of [join(root, name), join(root, 'node_modules', name)]) {
+  // a project root. A globally installed DSH also nests its own dependencies
+  // under `@deepseek-ai/dsh/node_modules`, so look there too.
+  const candidates = [
+    join(root, name),
+    join(root, 'node_modules', name),
+    join(root, '@deepseek-ai', 'dsh', 'node_modules', name),
+    join(root, 'node_modules', '@deepseek-ai', 'dsh', 'node_modules', name),
+  ]
+  for (const pkgDir of candidates) {
     const manifest = join(pkgDir, 'package.json')
     if (!existsSync(manifest)) continue
     let pkg
@@ -205,7 +227,82 @@ function textOf(content) {
     .join('')
 }
 
-function responsesInput(options) {
+/**
+ * Text the model sees when an attached image could not be sent. Silence would
+ * let it answer as if nothing had been attached.
+ */
+function imagePlaceholderText(ref) {
+  const name = typeof ref?.name === 'string' && ref.name.trim() ? ` ${JSON.stringify(ref.name.trim())}` : ''
+  return `[attached image${name} could not be included in this request]`
+}
+
+/**
+ * Read every attached image once, keyed by attachment id, so the sync input
+ * builder can inline them as `input_image` parts.
+ *
+ * Uses the host's durable attachment store, which normalizes to the request
+ * budget for us. Without the store (or if the read fails) the image degrades to
+ * a text placeholder rather than vanishing.
+ */
+export async function collectImageParts(options, resolveAttachments, policy = {}) {
+  const parts = new Map()
+  const refs = []
+  for (const message of options.messages ?? []) {
+    for (const block of message?.content ?? []) {
+      if (block?.type !== 'image' || !block.attachment) continue
+      const id = block.attachment.attachmentId
+      if (typeof id !== 'string' || !id || parts.has(id)) continue
+      parts.set(id, undefined)
+      refs.push(block.attachment)
+    }
+  }
+  if (refs.length === 0) return parts
+  let store
+  try {
+    store = resolveAttachments?.()
+  } catch {
+    store = undefined
+  }
+  if (!store?.readImageRequest) return parts
+  const request = {
+    maxPixels: policy.maxPixels ?? REQUEST_IMAGE_PIXEL_BUDGET,
+    maxBytes: policy.maxBytes ?? REQUEST_IMAGE_MAX_BYTES,
+  }
+  await Promise.all(refs.map(async ref => {
+    try {
+      const version = await store.readImageRequest(ref, request)
+      if (!version?.data || typeof version.mediaType !== 'string' || !version.mediaType) return
+      parts.set(ref.attachmentId, {
+        mediaType: version.mediaType,
+        base64: Buffer.from(version.data).toString('base64'),
+      })
+    } catch {
+      // Leave the entry undefined so the placeholder text is used instead.
+    }
+  }))
+  return parts
+}
+
+function imageContentParts(blocks, imageParts) {
+  const parts = []
+  const text = textOf(blocks)
+  if (text) parts.push({ type: 'input_text', text })
+  for (const block of blocks ?? []) {
+    if (block?.type !== 'image' || !block.attachment) continue
+    const resolved = imageParts?.get(block.attachment.attachmentId)
+    if (resolved) {
+      parts.push({
+        type: 'input_image',
+        image_url: `data:${resolved.mediaType};base64,${resolved.base64}`,
+      })
+    } else {
+      parts.push({ type: 'input_text', text: imagePlaceholderText(block.attachment) })
+    }
+  }
+  return parts
+}
+
+function responsesInput(options, imageParts) {
   const input = []
   const system = typeof options.system === 'string' && options.system ? options.system : undefined
   if (system) input.push({ role: 'system', content: system })
@@ -234,6 +331,13 @@ function responsesInput(options) {
       }
       const text = textOf(message.content)
       if (text) input.push({ role: 'assistant', content: text })
+      continue
+    }
+    // User turns carrying images become the Responses API content-part array.
+    const hasImage = (message.content ?? []).some(block => block?.type === 'image')
+    if (role === 'user' && hasImage) {
+      const parts = imageContentParts(message.content, imageParts)
+      if (parts.length > 0) input.push({ role, content: parts })
       continue
     }
     const text = textOf(message.content)
@@ -297,7 +401,7 @@ async function* streamResponsesUnsafe(options, token) {
   }
   const body = {
     model: options.model,
-    input: responsesInput(options),
+    input: responsesInput(options, await collectImageParts(options, options.resolveAttachments)),
     stream: true,
   }
   if (typeof options.maxTokens === 'number') body.max_output_tokens = options.maxTokens
@@ -530,7 +634,7 @@ export function visiblePiModels(session) {
   ))
 }
 
-function createDuckAdapter(session) {
+function createDuckAdapter(session, adapterOptions = {}) {
   const providerInfo = () => ({ id: PROVIDER_ID, name: DISPLAY_NAME })
   const list = () => {
     const signedIn = session.publicAccount()?.signedIn === true
@@ -572,6 +676,10 @@ function createDuckAdapter(session) {
         yield { type: 'finish', reason: { kind: 'error', failure: { message: 'Unknown provider', code: 'NO_ADAPTER' } } }
         return
       }
+      // The host attachment store is supplied by the plugin, not by the caller.
+      const callOptions = typeof adapterOptions.resolveAttachments === 'function'
+        ? { ...options, resolveAttachments: adapterOptions.resolveAttachments }
+        : options
       let token = await session.currentToken()
       if (!token) {
         yield { type: 'finish', reason: { kind: 'error', failure: { message: 'Grok subscription is not signed in', code: 'MISSING_CREDENTIAL' } } }
@@ -583,7 +691,7 @@ function createDuckAdapter(session) {
       for (let attempt = 0; ; attempt++) {
         let emitted = false
         try {
-          for await (const chunk of streamResponses(options, token)) {
+          for await (const chunk of streamResponses(callOptions, token, callOptions.resolveAttachments)) {
             emitted = true
             yield chunk
           }
@@ -693,7 +801,7 @@ function wrapAsHostAdapter(candidate, dshLlm) {
  * Used so apply() can register immediately and return without wedging the loader.
  */
 export function createGrokBuildAdapterSync(session, options = {}) {
-  const duck = createDuckAdapter(session)
+  const duck = createDuckAdapter(session, { resolveAttachments: options.resolveAttachments })
   const dshLlm = options.dshLlm
   return {
     adapter: wrapAsHostAdapter(duck, dshLlm),
@@ -715,7 +823,7 @@ export async function createGrokBuildAdapter(session, options = {}) {
     optionalImport('@deepseek-ai/dsh-llm', importOpts),
   ])
 
-  const duck = createDuckAdapter(session)
+  const duck = createDuckAdapter(session, { resolveAttachments: options.resolveAttachments })
   const asHostAdapter = candidate => wrapAsHostAdapter(candidate, dshLlm)
   if (!piAi?.createProvider || !dshPi?.PiAiAdapter) {
     return {

@@ -25,7 +25,7 @@
 
 ## 三步开始
 
-1. **安装插件**：在终端运行下面的命令；指定候选版本时填写完整的 `包名@版本`，例如 `dsh-grok-subscription@1.0.6`。
+1. **安装插件**：在终端运行下面的命令；指定候选版本时填写完整的 `包名@版本`，例如 `dsh-grok-subscription@1.0.7`。
 
    ```sh
    dsh plugin --profile web add BaronCyrus/dsh-grok-subscription
@@ -91,7 +91,7 @@ dsh plugin --profile web add BaronCyrus/dsh-grok-subscription
 也可以按 npm 上的已发布版本安装：
 
 ```sh
-dsh plugin --profile web add dsh-grok-subscription@1.0.6
+dsh plugin --profile web add dsh-grok-subscription@1.0.7
 ```
 
 目标选择、profile 锁、依赖解析和 bundle 激活均由 DSH 负责。
@@ -159,6 +159,10 @@ dsh --profile web --dump-config
 ### 图片输入
 
 `grok-4.7`、`grok-4.7-fast` 与 `grok-4.6` 支持图片输入：在输入框粘贴或附加图片即可提问。图片由宿主的附件服务按像素与体积预算归一化后发送，超预算时降级为文本说明，而不是静默丢弃。
+
+**两条通路都支持**：宿主官方 `pi-ai` 适配器可用时走官方实现，否则内置回退适配器自己读取附件字节并内联成 `input_image`。因此贴图能力不依赖宿主包的解析结果。设置页的「运行通路」会显示当前生效的是哪一条，以及图片输入是否可用 —— 遇到「当前模型不支持图片」时先看这一行。
+
+> 若显示「内置回退」且贴图被拒，通常是 `dsh web` 更新后没有重启：客户端界面会随刷新更新，但主机端适配器是进程启动时加载的。
 
 `grok-4.5` **不在支持列表内**。实测给它一张纯红图片并询问颜色，它回答 "green"，还把黄色方块描述成「带黑边的圆」——它在编造而不是看图。插件因此不为它声明图片能力，避免输出看起来自信却完全错误的答案。
 

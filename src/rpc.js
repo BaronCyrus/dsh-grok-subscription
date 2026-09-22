@@ -71,8 +71,17 @@ function sanitizeUsage(usage) {
   return out
 }
 
-async function dispatch(session, endpoint) {
-  if (endpoint === 'status') return publicResult(stripSecrets(await session.status()))
+async function dispatch(session, endpoint, diagnostics) {
+  if (endpoint === 'status') {
+    const status = await session.status()
+    return publicResult(stripSecrets({
+      ...status,
+      // Which adapter is actually serving this route: the host's official
+      // pi-ai implementation or the bundled fallback. Diagnosing "model does
+      // not support images" starts here.
+      diagnostics: typeof diagnostics === 'function' ? diagnostics() : diagnostics,
+    }))
+  }
   if (endpoint === 'pull') return publicResult(stripSecrets(await session.pull()))
   if (endpoint === 'logout') return publicResult(stripSecrets(await session.logout()))
   if (endpoint === 'catalog/refresh') {
@@ -98,7 +107,7 @@ export function createRpcHandler(session, options = {}) {
   return async function handle(endpoint, _payload, _signal) {
     try {
       return await withTimeout(
-        dispatch(session, endpoint),
+        dispatch(session, endpoint, options.diagnostics),
         timeoutMs,
         `Grok subscription RPC "${endpoint}" timed out after ${timeoutMs}ms`,
         { unref: false },

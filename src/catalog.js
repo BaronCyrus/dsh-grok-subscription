@@ -138,7 +138,9 @@ export function toLlmModels(models) {
       provider: PROVIDER_ID,
       id: model.id,
       name: model.name,
-      inputModalities: ['text'],
+      // The bundled adapter inlines images through the host attachment store,
+      // so it advertises the same modality map as the official pi-ai path.
+      inputModalities: supportsImageInput(model.id) ? ['text', 'image'] : ['text'],
     }
     const reasoning = reasoningInfoOf(model)
     if (reasoning) info.reasoning = reasoning

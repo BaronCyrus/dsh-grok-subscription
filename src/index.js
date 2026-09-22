@@ -31,6 +31,20 @@ function softService(ctx, key) {
   return undefined
 }
 
+/**
+ * Lazily resolve the host's durable attachment store. It may register after
+ * this plugin, and it is only consulted when a request carries an image.
+ */
+function attachmentResolver(ctx) {
+  return () => {
+    try {
+      return typeof ctx.get === 'function' ? ctx.get('attachments') : undefined
+    } catch {
+      return undefined
+    }
+  }
+}
+
 export function apply(ctx, options = {}) {
   let active = true
   if (typeof ctx.effect === 'function') {
@@ -62,14 +76,31 @@ export function apply(ctx, options = {}) {
     logger: ctx.logger,
     onCatalogChange: notifyCatalogChange,
   })
-  const handler = createRpcHandler(session)
+  // Which adapter is live: the sync fallback until the deferred upgrade swaps in
+  // the host's official pi-ai implementation. Surfaced to Settings so a
+  // capability question ("why can't I attach an image?") is answerable without
+  // reading logs.
+  const adapterState = { kind: 'custom-mvp', upgraded: false }
+  const handler = createRpcHandler(session, {
+    diagnostics: () => ({
+      adapter: adapterState.upgraded ? 'pi-ai' : 'fallback',
+      adapterKind: adapterState.kind,
+      imageInput: typeof resolveAttachments()?.readImageRequest === 'function',
+      hostPeersResolved: adapterState.upgraded,
+    }),
+  })
+
+  // The host's durable attachment store, resolved lazily because it may register
+  // after this plugin and is only consulted when a request carries an image.
+  const resolveAttachments = attachmentResolver(ctx)
 
   const createSync = options.createSync ?? createGrokBuildAdapterSync
   // Register a duck host adapter synchronously so apply returns immediately
   // and the plugin list / Settings RPC are never blocked on pi-ai imports.
   try {
-    const created = createSync(session)
+    const created = createSync(session, { resolveAttachments })
     if (created.note) ctx.logger?.debug?.(created.note)
+    adapterState.kind = created.kind
     ctx.llm.registerAdapter([PROVIDER_ID], created.adapter)
     // Catalog notify deferred so pickers refresh without re-entering apply.
     notifyCatalogChange()
@@ -82,7 +113,7 @@ export function apply(ctx, options = {}) {
 
   const defer = options.defer ?? scheduleDeferred
   defer(() => {
-    void deferredBoot(ctx, session, notifyCatalogChange, options)
+    void deferredBoot(ctx, session, notifyCatalogChange, options, adapterState)
   })
 
   ctx.inject(['connection'], connectionContext => connectionContext.effect(
@@ -91,7 +122,7 @@ export function apply(ctx, options = {}) {
   ))
 }
 
-async function deferredBoot(ctx, session, notifyCatalogChange, options = {}) {
+async function deferredBoot(ctx, session, notifyCatalogChange, options = {}, adapterState) {
   if (!options.skipSettings) {
     await tryRegisterSettings(ctx)
   }
@@ -123,20 +154,15 @@ async function deferredBoot(ctx, session, notifyCatalogChange, options = {}) {
   if (options.skipUpgrade) return
 
   const createAsync = options.createAsync ?? createGrokBuildAdapter
-  // Resolved lazily: the attachment service may register after this plugin, and
-  // it is only consulted when a request actually carries an image.
-  const resolveAttachments = () => {
-    try {
-      return typeof ctx.get === 'function' ? ctx.get('attachments') : undefined
-    } catch {
-      return undefined
-    }
-  }
   try {
-    const created = await createAsync(session, { ...options.adapterOptions, resolveAttachments })
+    const created = await createAsync(session, { ...options.adapterOptions, resolveAttachments: attachmentResolver(ctx) })
     if (created.kind === 'pi-ai') {
       if (created.note) ctx.logger?.warn?.(created.note)
       ctx.llm.registerAdapter([PROVIDER_ID], created.adapter)
+      if (adapterState) {
+        adapterState.kind = created.kind
+        adapterState.upgraded = true
+      }
       notifyCatalogChange?.()
     } else if (created.note) {
       ctx.logger?.debug?.(created.note)

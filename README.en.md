@@ -25,7 +25,7 @@ Models, reasoning effort, and weekly quota all stay inside DSH.
 
 ## Three-step start
 
-1. **Install the plugin.** Run the command below; to select a candidate version, enter the full `package@version`, for example `dsh-grok-subscription@1.0.6`.
+1. **Install the plugin.** Run the command below; to select a candidate version, enter the full `package@version`, for example `dsh-grok-subscription@1.0.7`.
 
    ```sh
    dsh plugin --profile web add BaronCyrus/dsh-grok-subscription
@@ -91,7 +91,7 @@ dsh plugin --profile web add BaronCyrus/dsh-grok-subscription
 You can also install the version published on npm:
 
 ```sh
-dsh plugin --profile web add dsh-grok-subscription@1.0.6
+dsh plugin --profile web add dsh-grok-subscription@1.0.7
 ```
 
 DSH handles target selection, the profile lock, dependency resolution, and bundle activation.
@@ -159,6 +159,10 @@ The badge appears only when the current session's provider is `grok-build` and t
 ### Image input
 
 `grok-4.7`, `grok-4.7-fast` and `grok-4.6` accept image input: paste or attach an image in the composer and ask about it. Images are normalized to the host's pixel and byte budget by its attachment service before they are sent, and an over-budget image degrades to a text description rather than being dropped silently.
+
+**Both paths support it**: when the host's official `pi-ai` adapter is available it handles images, and otherwise the bundled fallback adapter reads the attachment bytes itself and inlines them as `input_image`. Image support therefore does not depend on resolving the host's packages. The **Active path** row in Settings shows which one is live and whether image input is available — check it first when a model rejects an image.
+
+> If it says "bundled fallback" and images are rejected, `dsh web` most likely was not restarted after updating: the client UI refreshes from disk, but the host adapter is loaded at process start.
 
 `grok-4.5` is **deliberately excluded**. Given a solid red image and asked its colour it answered "green", and it described a yellow square as a "circle with a black outline" — it confabulates instead of looking. The plugin therefore does not advertise image input for it, so it cannot return confident nonsense.
 
