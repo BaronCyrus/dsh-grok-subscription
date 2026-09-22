@@ -25,7 +25,7 @@ Models, reasoning effort, and weekly quota all stay inside DSH.
 
 ## Three-step start
 
-1. **Install the plugin.** Run the command below; to select a candidate version, enter the full `package@version`, for example `dsh-grok-subscription@1.0.4`.
+1. **Install the plugin.** Run the command below; to select a candidate version, enter the full `package@version`, for example `dsh-grok-subscription@1.0.5`.
 
    ```sh
    dsh plugin --profile web add BaronCyrus/dsh-grok-subscription
@@ -47,6 +47,7 @@ Restart `dsh web` after installing or upgrading, otherwise the old `lib/` keeps 
 | **Usage panel (experimental)** | Settings shows the used and remaining percentages the backend reports, and never invents numbers when the read fails |
 | **Credentials stay local** | Only the short-lived access token from `~/.grok/auth.json` is read on the host; no token is handed to browser RPC |
 | **Sign-in state refreshes the UI** | Login, pull, and logout emit `llm/adapters-updated`, so the chat model list updates with them |
+| **Automatic token renewal** | The access token only lives 6 hours; near expiry, or on a 401, the plugin runs the official `grok` CLI to refresh `auth.json` and retries once, so you never re-login by hand |
 | **Failures stay visible** | When subscription routing is unavailable it reports an error instead of silently using another paid route |
 
 These capabilities reuse the same local Grok Build sign-in.
@@ -89,7 +90,7 @@ dsh plugin --profile web add BaronCyrus/dsh-grok-subscription
 You can also install the version published on npm:
 
 ```sh
-dsh plugin --profile web add dsh-grok-subscription@1.0.4
+dsh plugin --profile web add dsh-grok-subscription@1.0.5
 ```
 
 DSH handles target selection, the profile lock, dependency resolution, and bundle activation.
@@ -142,7 +143,8 @@ Restart DSH manually afterwards, then:
 - The model menu offers `low` / `medium` / `high` / `xhigh` reasoning effort, defaulting to `high`;
 - A weekly remaining quota badge sits beside the model picker in the composer, with remaining percentage and reset time on hover or click;
 - Settings can show the used and remaining percentages the backend reports, and says so plainly instead of guessing when the read fails;
-- Supports CLI login, device-code login, pull from the Grok CLI, and logout; the chat model list refreshes whenever sign-in state changes;
+- Supports CLI login, device-code login, pull from the Grok CLI, and logout;
+- Renews the access token automatically: near the end of its 6-hour life, or on a 401, it runs the official `grok` CLI and retries once, so a session never lapses mid-use; the chat model list refreshes whenever sign-in state changes;
 - When subscription routing is unavailable it reports an error instead of silently switching to another paid route.
 
 ### Composer quota
@@ -198,6 +200,7 @@ npx -y @deepseek-ai/dsh@0.1.5-rc.2 plugin --profile web remove dsh-grok-subscrip
 - **Nothing changed after upgrading**: the plugin keeps running the old `lib/` — reinstall the plugin, restart `dsh web`, and hard-refresh (Ctrl+Shift+R);
 - **It reports `auth.json` permissions**: apply the `chmod 600` above; the plugin refuses symlinks and group- or other-readable files;
 - **"No reply" after sending a message**: upgrade to `1.0.1` or later. `1.0.0` had a defect where tool-calling turns aborted with a non-serializable stream chunk, leaving no reply in the UI at all.
+- **Chat or usage reports 401 "Invalid or expired credentials"**: a Grok access token only lives about 6 hours, and once it lapses chat and usage fail together. From `1.0.5` the plugin renews it through the official CLI automatically; on older versions run any `grok` command (for example `grok models`) to refresh `~/.grok/auth.json`, then click **Pull from Grok CLI**.
 
 ## Scope and support
 

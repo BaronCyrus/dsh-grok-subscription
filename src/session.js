@@ -2,9 +2,11 @@ import { existsSync } from 'node:fs'
 import { spawn } from 'node:child_process'
 import { join } from 'node:path'
 import {
+  CLI_REFRESH_TIMEOUT_MS,
   CREDENTIAL_REF_NAME,
   CREDENTIALS_IO_TIMEOUT_MS,
   STORE_TOKEN_TIMEOUT_MS,
+  TOKEN_EXPIRY_SKEW_MS,
 } from './constants.js'
 import { authJsonPath, grokHome, publicSessionView, readGrokAuthSession } from './auth-file.js'
 import { loadCatalog as defaultLoadCatalog } from './catalog.js'
@@ -42,6 +44,71 @@ export function spawnGrokLogin(options = {}) {
       else reject(new Error(signal ? `grok login terminated by ${signal}` : `grok login exited with code ${code ?? 'unknown'}`))
     })
   })
+}
+
+/**
+ * Lets the official CLI renew its own session. `grok models` is the cheapest
+ * command that goes through the CLI's refresh path: it exits in well under a
+ * second when the token is still valid, and rewrites auth.json when it is not.
+ *
+ * The CLI prints "You are not authenticated." even when it *did* refresh, so the
+ * exit status says nothing useful — callers must re-read auth.json and compare.
+ */
+export function spawnGrokRefresh(options = {}) {
+  const spawnFn = options.spawn ?? spawn
+  const bin = resolveGrokBin(options.env, options.exists)
+  const timeoutMs = typeof options.timeoutMs === 'number' && options.timeoutMs > 0
+    ? options.timeoutMs
+    : CLI_REFRESH_TIMEOUT_MS
+  return new Promise((resolve, reject) => {
+    let child
+    try {
+      child = spawnFn(bin, ['models'], {
+        stdio: options.stdio ?? 'ignore',
+        env: options.env ?? process.env,
+      })
+    } catch (error) {
+      reject(new Error(`Could not start grok CLI (${bin})`, { cause: error }))
+      return
+    }
+    let settled = false
+    const timer = setTimeout(() => {
+      if (settled) return
+      settled = true
+      try {
+        child.kill('SIGKILL')
+      } catch {
+        // Best effort: the timeout still resolves as a failed refresh.
+      }
+      resolve({ ok: false, reason: 'timeout' })
+    }, timeoutMs)
+    child.on('error', error => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      reject(new Error(`Could not run grok CLI (${bin})`, { cause: error }))
+    })
+    child.on('exit', code => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      // Exit status is not a reliable success signal; the caller re-reads auth.json.
+      resolve({ ok: true, code })
+    })
+  })
+}
+
+/**
+ * Default renewal: hand off to the official CLI, then re-read auth.json.
+ * Returns the renewed session, or undefined when the CLI is unavailable or the
+ * file still holds the old token.
+ */
+async function defaultRenewSession(options = {}) {
+  const env = options.env ?? process.env
+  if (!grokCliAvailable(env)) return undefined
+  await spawnGrokRefresh({ env })
+  const parsed = (options.readAuth ?? readGrokAuthSession)()
+  return parsed?.session
 }
 
 async function defaultCredentialRefOf() {
@@ -85,12 +152,16 @@ export function createSessionService({
   storeTokenTimeoutMs = STORE_TOKEN_TIMEOUT_MS,
   credentialsIoTimeoutMs = CREDENTIALS_IO_TIMEOUT_MS,
   credentialRefOf = defaultCredentialRefOf,
+  renewSession = defaultRenewSession,
+  now = () => Date.now(),
 } = {}) {
   let catalog = { models: [], source: 'signed-out', error: undefined }
   let lastPublic = publicSessionView(undefined)
   let lastUsage = unavailableUsage('Not fetched yet')
   /** In-process access token so Pull/adapters never wait on credentials I/O. */
   let memoryAccessToken
+  /** Epoch ms when the in-memory token stops working, when auth.json said so. */
+  let memoryTokenExpiresAt
   /** After an in-process Pull/logout touched session memory, skip hanging credentials.resolve. */
   let memorySessionTouched = false
 
@@ -104,6 +175,62 @@ export function createSessionService({
     return typeof credentialsIoTimeoutMs === 'number' && credentialsIoTimeoutMs > 0
       ? credentialsIoTimeoutMs
       : CREDENTIALS_IO_TIMEOUT_MS
+  }
+
+  /** auth.json stores `expires_at` as an ISO string; tolerate ms too. */
+  const epochMs = value => {
+    if (typeof value === 'number' && Number.isFinite(value)) return value
+    if (typeof value === 'string' && value.trim()) {
+      const parsed = Date.parse(value.trim())
+      if (Number.isFinite(parsed)) return parsed
+    }
+    return undefined
+  }
+
+  /** Adopt a session read from auth.json (or a fresh CLI renewal) into memory. */
+  const adoptSession = session => {
+    if (!session?.accessToken) return undefined
+    memoryAccessToken = session.accessToken
+    memoryTokenExpiresAt = epochMs(session.expiresAt)
+    memorySessionTouched = true
+    lastPublic = publicSessionView(session)
+    return memoryAccessToken
+  }
+
+  /**
+   * True when the in-memory token is known to be expired (or about to expire).
+   * An unknown expiry is treated as usable: never force a CLI spawn on a hunch.
+   */
+  const memoryTokenNeedsRenewal = () => {
+    if (typeof memoryAccessToken !== 'string' || memoryAccessToken.length === 0) return false
+    if (typeof memoryTokenExpiresAt !== 'number') return false
+    return memoryTokenExpiresAt - TOKEN_EXPIRY_SKEW_MS <= now()
+  }
+
+  let renewalInFlight
+  /**
+   * Ask the official CLI to renew, then re-read auth.json. Concurrent callers
+   * (several sessions hitting the same expired token) share one spawn.
+   */
+  const renewAccessToken = async () => {
+    if (renewalInFlight) return renewalInFlight
+    renewalInFlight = (async () => {
+      try {
+        const session = await renewSession()
+        const token = adoptSession(session)
+        if (token) notifyCatalogChange()
+        return token
+      } catch (error) {
+        logger?.warn?.(
+          'Grok subscription session renewal failed: %s',
+          error instanceof Error ? error.message : 'unknown',
+        )
+        return undefined
+      } finally {
+        renewalInFlight = undefined
+      }
+    })()
+    return renewalInFlight
   }
 
   const notifyCatalogChange = () => {
@@ -123,7 +250,12 @@ export function createSessionService({
 
   const readStoredToken = async () => {
     if (typeof memoryAccessToken === 'string' && memoryAccessToken.length > 0) {
-      return memoryAccessToken
+      if (!memoryTokenNeedsRenewal()) return memoryAccessToken
+      // Expired in memory: the CLI owns renewal, so let it rewrite auth.json and
+      // re-read. Falling back to the stale token keeps the eventual error a real
+      // 401 rather than a misleading "not signed in".
+      const renewed = await renewAccessToken()
+      return renewed ?? memoryAccessToken
     }
     // Signed-out pull / logout already cleared memory: do not block adapters on
     // credentialRef/resolve (cold start still falls through when untouched).
@@ -250,6 +382,7 @@ export function createSessionService({
     // and catalog/usage network work are deferred / backgrounded.
     const accessToken = parsed.session.accessToken
     memoryAccessToken = accessToken
+    memoryTokenExpiresAt = epochMs(parsed.session.expiresAt)
     memorySessionTouched = true
     lastPublic = publicSessionView(parsed.session)
     scheduleDeferred(() => {
@@ -277,9 +410,7 @@ export function createSessionService({
     try {
       const parsed = readAuth()
       if (parsed.session) {
-        memoryAccessToken = parsed.session.accessToken
-        memorySessionTouched = true
-        lastPublic = publicSessionView(parsed.session)
+        adoptSession(parsed.session)
         return { account: lastPublic, catalog, usage: lastUsage, cliAvailable: grokCliAvailable(), authPath: authJsonPath() }
       }
     } catch (error) {
@@ -338,6 +469,8 @@ export function createSessionService({
     login,
     logout,
     currentToken: readStoredToken,
+    /** Force a CLI-backed renewal; used when the provider answers 401. */
+    refreshToken: () => renewAccessToken(),
     models: () => catalog.models,
     catalog: () => catalog,
     usage: () => lastUsage,

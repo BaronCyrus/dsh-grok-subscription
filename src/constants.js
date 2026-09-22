@@ -35,6 +35,13 @@ export const AUTH_FILE_MAX_BYTES = 1_048_576
 export const CATALOG_TIMEOUT_MS = 15_000
 export const USAGE_TIMEOUT_MS = 8_000
 export const STORE_TOKEN_TIMEOUT_MS = 5_000
+/**
+ * Renew the short-lived token this long before it actually expires, so a request
+ * in flight cannot cross the boundary and get a 401.
+ */
+export const TOKEN_EXPIRY_SKEW_MS = 120_000
+/** The official CLI needs a moment to start, refresh, and rewrite auth.json. */
+export const CLI_REFRESH_TIMEOUT_MS = 20_000
 export const STREAM_IDLE_TIMEOUT_MS = 10 * 60 * 1000
 export const MAX_REQUEST_IMAGE_BYTES = 20 * 1024 * 1024
 export const REQUEST_IMAGE_PIXEL_BUDGET = 2048 * 2048

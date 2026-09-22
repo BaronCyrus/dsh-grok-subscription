@@ -25,7 +25,7 @@
 
 ## 三步开始
 
-1. **安装插件**：在终端运行下面的命令；指定候选版本时填写完整的 `包名@版本`，例如 `dsh-grok-subscription@1.0.4`。
+1. **安装插件**：在终端运行下面的命令；指定候选版本时填写完整的 `包名@版本`，例如 `dsh-grok-subscription@1.0.5`。
 
    ```sh
    dsh plugin --profile web add BaronCyrus/dsh-grok-subscription
@@ -47,6 +47,7 @@
 | **用量面板（实验性）** | 设置页显示服务端返回的已用与剩余百分比，读取失败时不猜数字、不虚构额度 |
 | **凭据留在本机** | 只在主机侧读取 `~/.grok/auth.json` 的短期 access token；不会把 token 交给浏览器 RPC |
 | **登录状态会刷新界面** | 登录、拉取或登出后自动派发 `llm/adapters-updated`，Chat 模型列表随之更新 |
+| **token 自动续期** | access token 只有 6 小时有效期；临近过期或遇到 401 时，插件会调用官方 `grok` CLI 刷新 `auth.json` 并自动重试一次，不需要手动重新登录 |
 | **失败可见** | 订阅路由不可用时明确报错，不会静默改用其他付费路由 |
 
 这些能力共用同一份本机 Grok Build 登录。
@@ -89,7 +90,7 @@ dsh plugin --profile web add BaronCyrus/dsh-grok-subscription
 也可以按 npm 上的已发布版本安装：
 
 ```sh
-dsh plugin --profile web add dsh-grok-subscription@1.0.4
+dsh plugin --profile web add dsh-grok-subscription@1.0.5
 ```
 
 目标选择、profile 锁、依赖解析和 bundle 激活均由 DSH 负责。
@@ -143,6 +144,7 @@ dsh --profile web --dump-config
 - 输入框模型选择器旁显示每周剩余额度徽章，悬停或点击查看剩余比例与重置时间；
 - 设置页可查看服务端返回的用量与剩余百分比，失败时明确提示而不是显示猜测值；
 - 支持 CLI 登录、设备码登录、从 Grok CLI 拉取和登出；登录状态变化后 Chat 模型列表自动刷新；
+- access token 到期自动续期：临近 6 小时有效期或收到 401 时，调用官方 `grok` CLI 刷新会话并重试一次，不会中途要求手动重新登录；
 - 订阅路由不可用时明确报错，不会静默切换到其他付费路由。
 
 ### 输入框额度
@@ -198,6 +200,7 @@ npx -y @deepseek-ai/dsh@0.1.5-rc.2 plugin --profile web remove dsh-grok-subscrip
 - **升级后界面没变化**：插件会继续运行旧的 `lib/`，请重新安装插件并重启 `dsh web`，然后硬刷新（Ctrl+Shift+R）；
 - **提示 `auth.json` 权限不正确**：按上面的 `chmod 600` 处理；插件拒绝读取符号链接或组/其他用户可读的文件；
 - **出现「没有回复」**：请升级到 `1.0.1` 或更高版本。`1.0.0` 存在一个缺陷：工具调用轮次会因流片段无法无损序列化而整轮中止，界面上完全没有回复。
+- **聊天或用量提示 401「Invalid or expired credentials」**：Grok 的 access token 只有约 6 小时有效期，过期后聊天和用量会一起失败。`1.0.5` 起插件会自动调用官方 CLI 续期；更早版本请先运行任意 `grok` 命令（如 `grok models`）刷新 `~/.grok/auth.json`，再点面板里的「从 Grok CLI 拉取」。
 
 ## 边界与支持
 

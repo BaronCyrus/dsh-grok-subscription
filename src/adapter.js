@@ -431,22 +431,49 @@ function createDuckAdapter(session) {
         yield { type: 'finish', reason: { kind: 'error', failure: { message: 'Unknown provider', code: 'NO_ADAPTER' } } }
         return
       }
-      const token = await session.currentToken()
+      let token = await session.currentToken()
       if (!token) {
         yield { type: 'finish', reason: { kind: 'error', failure: { message: 'Grok subscription is not signed in', code: 'MISSING_CREDENTIAL' } } }
         return
       }
-      try {
-        yield* streamResponses(options, token)
-      } catch (error) {
-        const aborted = options.signal?.aborted === true
-        const failure = {
-          message: error instanceof Error ? error.message : 'Grok Build request failed',
-          code: aborted ? 'ABORTED' : 'PROVIDER',
+      // The token is short-lived and the CLI renews it. When the proxy answers
+      // 401 anyway, renew once and retry — but only if nothing was emitted yet,
+      // so a partially streamed answer is never duplicated.
+      for (let attempt = 0; ; attempt++) {
+        let emitted = false
+        try {
+          for await (const chunk of streamResponses(options, token)) {
+            emitted = true
+            yield chunk
+          }
+          return
+        } catch (error) {
+          const aborted = options.signal?.aborted === true
+          const status = finiteOr(error?.status, undefined)
+          const canRetry = (
+            !aborted
+            && !emitted
+            && attempt === 0
+            && status === 401
+            && typeof session.refreshToken === 'function'
+          )
+          if (canRetry) {
+            const renewed = await session.refreshToken()
+            if (renewed && renewed !== token) {
+              token = renewed
+              continue
+            }
+          }
+          const failure = {
+            message: status === 401
+              ? 'Grok Build session is expired or unauthorized (HTTP 401). Run grok login, then Pull from Grok CLI.'
+              : error instanceof Error ? error.message : 'Grok Build request failed',
+            code: aborted ? 'ABORTED' : status === 401 ? 'UNAUTHORIZED' : 'PROVIDER',
+          }
+          if (status !== undefined) failure.status = status
+          yield { type: 'finish', reason: { kind: aborted ? 'aborted' : 'error', failure } }
+          return
         }
-        const status = finiteOr(error?.status, undefined)
-        if (status !== undefined) failure.status = status
-        yield { type: 'finish', reason: { kind: aborted ? 'aborted' : 'error', failure } }
       }
     },
   }
