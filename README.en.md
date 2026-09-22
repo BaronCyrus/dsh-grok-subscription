@@ -25,7 +25,7 @@ Models, reasoning effort, and weekly quota all stay inside DSH.
 
 ## Three-step start
 
-1. **Install the plugin.** Run the command below; to select a candidate version, enter the full `package@version`, for example `dsh-grok-subscription@1.0.9`.
+1. **Install the plugin.** Run the command below; to select a candidate version, enter the full `package@version`, for example `dsh-grok-subscription@1.0.10`.
 
    ```sh
    dsh plugin --profile web add BaronCyrus/dsh-grok-subscription
@@ -91,7 +91,7 @@ dsh plugin --profile web add BaronCyrus/dsh-grok-subscription
 You can also install the version published on npm:
 
 ```sh
-dsh plugin --profile web add dsh-grok-subscription@1.0.9
+dsh plugin --profile web add dsh-grok-subscription@1.0.10
 ```
 
 DSH handles target selection, the profile lock, dependency resolution, and bundle activation.
@@ -146,7 +146,8 @@ Restart DSH manually afterwards, then:
 - Settings can show the used and remaining percentages the backend reports, and says so plainly instead of guessing when the read fails;
 - Supports CLI login, device-code login, pull from the Grok CLI, and logout;
 - Renews the access token automatically: near the end of its 6-hour life, or on a 401, it runs the official `grok` CLI and retries once, so a session never lapses mid-use; the chat model list refreshes whenever sign-in state changes;
-- When subscription routing is unavailable it reports an error instead of silently switching to another paid route.
+- When subscription routing is unavailable it reports an error instead of silently switching to another paid route;
+- Prefix caching follows xAI's automatic prompt-cache semantics: one DSH session keeps a stable `prompt_cache_key`, tool definitions stay in a stable order, and the fallback adapter preserves and replays `reasoning.encrypted_content` unchanged. Server-side eviction can still miss, and the plugin never invents a hit rate.
 
 ### Composer quota
 

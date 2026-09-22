@@ -1,7 +1,9 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  cacheStableTools,
   createDuckAdapter,
+  promptCacheKey,
   responsesInput,
   streamResponses,
   withEncryptedReasoningInclude,
@@ -48,6 +50,36 @@ test('duck stream block-end keeps accumulated assistant text (multi-turn render 
   }
 })
 
+test('duck stream always sets the session cache key and requests encrypted reasoning', async () => {
+  const previous = globalThis.fetch
+  let body
+  globalThis.fetch = async (_url, init) => {
+    body = JSON.parse(init.body)
+    return new Response(sse([
+      { type: 'response.output_text.delta', delta: 'ok' },
+      { type: 'response.completed', response: { status: 'completed' } },
+    ]), { status: 200, headers: { 'content-type': 'text/event-stream' } })
+  }
+  try {
+    await collect(streamResponses({
+      provider: PROVIDER_ID,
+      model: 'grok-4.7',
+      sessionId: 'session-123',
+      tools: [
+        { name: 'zeta', description: 'last', parameters: { type: 'object' } },
+        { name: 'alpha', description: 'first', parameters: { type: 'object' } },
+      ],
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }],
+    }, 'test-token'))
+    assert.equal(body.prompt_cache_key, 'grok:session-123')
+    assert.deepEqual(body.include, ['reasoning.encrypted_content'])
+    assert.equal(body.reasoning, undefined)
+    assert.deepEqual(body.tools.map(tool => tool.name), ['alpha', 'zeta'])
+  } finally {
+    globalThis.fetch = previous
+  }
+})
+
 test('duck stream requests encrypted reasoning when effort is set', async () => {
   const previous = globalThis.fetch
   let body
@@ -70,6 +102,62 @@ test('duck stream requests encrypted reasoning when effort is set', async () => 
   } finally {
     globalThis.fetch = previous
   }
+})
+
+test('responsesInput replays encrypted reasoning ahead of the unchanged prefix', () => {
+  const encrypted = {
+    type: 'reasoning',
+    id: 'rs_123',
+    encrypted_content: 'ciphertext',
+    summary: [],
+  }
+  const input = responsesInput({
+    messages: [
+      { role: 'user', content: [{ type: 'text', text: 'one' }] },
+      {
+        role: 'assistant',
+        source: {
+          replayState: {
+            response: { kind: 'grok-build-responses', version: 1 },
+            blocks: [{ type: 'reasoning', item: encrypted }, { type: 'text' }, { type: 'tool-call' }],
+          },
+        },
+        content: [
+          { type: 'reasoning', text: 'visible summary only' },
+          { type: 'text', text: 'answer' },
+          { type: 'tool-call', id: 'call-1', name: 'read', arguments: '{"path":"a"}' },
+        ],
+      },
+    ],
+  })
+  assert.deepEqual(input, [
+    { role: 'user', content: 'one' },
+    encrypted,
+    { type: 'function_call', call_id: 'call-1', name: 'read', arguments: '{"path":"a"}' },
+    { role: 'assistant', content: 'answer' },
+  ])
+})
+
+test('responsesInput ignores malformed or foreign replay metadata', () => {
+  const input = responsesInput({
+    messages: [{
+      role: 'assistant',
+      source: { replayState: { response: { kind: 'other', version: 1 }, blocks: [{ type: 'reasoning', item: { type: 'reasoning' } }] } },
+      content: [{ type: 'reasoning', text: 'summary' }, { type: 'text', text: 'answer' }],
+    }],
+  })
+  assert.deepEqual(input, [{ role: 'assistant', content: 'answer' }])
+})
+
+test('prompt cache keys stay stable and isolate auxiliary requests', () => {
+  assert.equal(promptCacheKey({ sessionId: 'session-123' }), 'grok:session-123')
+  assert.equal(promptCacheKey({ sessionId: 'session-123', purpose: 'compaction' }), 'grok:compaction:session-123')
+  assert.equal(promptCacheKey({}), undefined)
+  assert.equal(promptCacheKey({ sessionId: 'x'.repeat(80) }).length, 64)
+  assert.deepEqual(cacheStableTools([
+    { name: 'zeta', description: 'z' },
+    { name: 'alpha', description: 'a', parameters: {} },
+  ]).map(tool => tool.name), ['alpha', 'zeta'])
 })
 
 test('responsesInput skips empty assistant turns left by older builds', () => {

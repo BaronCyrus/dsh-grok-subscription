@@ -102,6 +102,32 @@ test('missing or malformed detail blocks keep the plain totals', async () => {
   assert.equal(junk.cacheReadTokens, 0)
 })
 
+test('completed reasoning ciphertext is stored beside its emitted block', async () => {
+  const encrypted = { type: 'reasoning', id: 'rs_123', encrypted_content: 'ciphertext', summary: [] }
+  const original = globalThis.fetch
+  globalThis.fetch = async () => sseResponse([
+    { type: 'response.reasoning_text.delta', delta: 'summary' },
+    { type: 'response.output_item.done', item: encrypted },
+    { type: 'response.output_text.delta', delta: 'answer' },
+    { type: 'response.completed', response: { status: 'completed', output: [], usage: { input_tokens: 4, output_tokens: 2 } } },
+  ])
+  try {
+    let finish
+    for await (const chunk of streamResponses({
+      model: 'grok-4.7',
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }],
+    }, 'test-token')) {
+      if (chunk.type === 'finish') finish = chunk
+    }
+    assert.equal(finish.replayState.response.kind, 'grok-build-responses')
+    assert.equal(finish.replayState.blocks.length, 2)
+    assert.deepEqual(finish.replayState.blocks[0].item, encrypted)
+    assert.deepEqual(finish.replayState.blocks[1], { type: 'text' })
+  } finally {
+    globalThis.fetch = original
+  }
+})
+
 test('prompt_tokens/completion_tokens fallbacks still work', async () => {
   const usage = await usageFrom([completed({
     prompt_tokens: 200,

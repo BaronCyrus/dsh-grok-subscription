@@ -25,7 +25,7 @@
 
 ## 三步开始
 
-1. **安装插件**：在终端运行下面的命令；指定候选版本时填写完整的 `包名@版本`，例如 `dsh-grok-subscription@1.0.9`。
+1. **安装插件**：在终端运行下面的命令；指定候选版本时填写完整的 `包名@版本`，例如 `dsh-grok-subscription@1.0.10`。
 
    ```sh
    dsh plugin --profile web add BaronCyrus/dsh-grok-subscription
@@ -91,7 +91,7 @@ dsh plugin --profile web add BaronCyrus/dsh-grok-subscription
 也可以按 npm 上的已发布版本安装：
 
 ```sh
-dsh plugin --profile web add dsh-grok-subscription@1.0.9
+dsh plugin --profile web add dsh-grok-subscription@1.0.10
 ```
 
 目标选择、profile 锁、依赖解析和 bundle 激活均由 DSH 负责。
@@ -146,7 +146,8 @@ dsh --profile web --dump-config
 - 设置页可查看服务端返回的用量与剩余百分比，失败时明确提示而不是显示猜测值；
 - 支持 CLI 登录、设备码登录、从 Grok CLI 拉取和登出；登录状态变化后 Chat 模型列表自动刷新；
 - access token 到期自动续期：临近 6 小时有效期或收到 401 时，调用官方 `grok` CLI 刷新会话并重试一次，不会中途要求手动重新登录；
-- 订阅路由不可用时明确报错，不会静默切换到其他付费路由。
+- 订阅路由不可用时明确报错，不会静默切换到其他付费路由；
+- 前缀缓存按 xAI 的自动缓存语义优化：同一 DSH 会话使用稳定的 `prompt_cache_key`，工具定义保持稳定顺序，回退适配器会保存并原样回放 `reasoning.encrypted_content`。缓存仍可能因服务端逐出而失效，插件不虚构命中率。
 
 ### 输入框额度
 

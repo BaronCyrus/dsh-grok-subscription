@@ -302,6 +302,58 @@ function imageContentParts(blocks, imageParts) {
   return parts
 }
 
+const PROMPT_CACHE_KEY_MAX_LENGTH = 64
+const REPLAY_KIND = 'grok-build-responses'
+const REPLAY_VERSION = 1
+
+/**
+ * xAI routes a Responses conversation by `prompt_cache_key`. Keep one stable
+ * value for the whole DSH session, including every tool step, and isolate an
+ * auxiliary call so its rewritten prompt cannot evict the conversation prefix.
+ */
+export function promptCacheKey(options) {
+  const sessionId = typeof options?.sessionId === 'string' ? options.sessionId.trim() : ''
+  if (!sessionId) return undefined
+  const suffix = options.purpose === 'compaction' || options.purpose === 'session-title'
+    ? `:${options.purpose}`
+    : ''
+  const key = `grok${suffix}:${sessionId}`
+  return key.length <= PROMPT_CACHE_KEY_MAX_LENGTH ? key : key.slice(0, PROMPT_CACHE_KEY_MAX_LENGTH)
+}
+
+/** Stable tool order keeps the cacheable prefix intact when the host reorders schemas. */
+export function cacheStableTools(tools) {
+  if (!Array.isArray(tools) || tools.length === 0) return []
+  return tools.map((tool, index) => ({ tool, index }))
+    .sort((left, right) => {
+      const byName = String(left.tool?.name ?? '').localeCompare(String(right.tool?.name ?? ''))
+      return byName === 0 ? left.index - right.index : byName
+    })
+    .map(({ tool }) => ({
+      type: 'function',
+      name: tool.name,
+      description: tool.description,
+      parameters: tool.parameters,
+    }))
+}
+
+function replayEnvelope(message) {
+  const state = message?.source?.replayState
+  return (
+    state?.response?.kind === REPLAY_KIND
+    && state.response.version === REPLAY_VERSION
+    && Array.isArray(state.blocks)
+  ) ? state : undefined
+}
+
+function replayReasoningItem(message, contentIndex) {
+  const entry = replayEnvelope(message)?.blocks[contentIndex]
+  const item = entry?.type === 'reasoning' ? entry.item : undefined
+  return item?.type === 'reasoning' && typeof item.encrypted_content === 'string' && item.encrypted_content
+    ? item
+    : undefined
+}
+
 function responsesInput(options, imageParts) {
   const input = []
   const system = typeof options.system === 'string' && options.system ? options.system : undefined
@@ -321,7 +373,15 @@ function responsesInput(options, imageParts) {
       continue
     }
     if (role === 'assistant' && toolCalls.length) {
-      for (const block of toolCalls) {
+      const content = message.content ?? []
+      for (let index = 0; index < content.length; index++) {
+        const block = content[index]
+        if (block?.type === 'reasoning') {
+          const item = replayReasoningItem(message, index)
+          if (item) input.push(item)
+          continue
+        }
+        if (block?.type !== 'tool-call') continue
         input.push({
           type: 'function_call',
           call_id: block.id,
@@ -338,6 +398,23 @@ function responsesInput(options, imageParts) {
     if (role === 'user' && hasImage) {
       const parts = imageContentParts(message.content, imageParts)
       if (parts.length > 0) input.push({ role, content: parts })
+      continue
+    }
+    if (role === 'assistant') {
+      const content = message.content ?? []
+      const output = []
+      let text = ''
+      for (let index = 0; index < content.length; index++) {
+        const block = content[index]
+        if (block?.type === 'reasoning') {
+          const item = replayReasoningItem(message, index)
+          if (item) output.push(item)
+        } else if (block?.type === 'text' && block.text) {
+          text += block.text
+        }
+      }
+      if (text) output.push({ role: 'assistant', content: text })
+      input.push(...output)
       continue
     }
     const text = textOf(message.content)
@@ -403,23 +480,17 @@ async function* streamResponsesUnsafe(options, token) {
     model: options.model,
     input: responsesInput(options, await collectImageParts(options, options.resolveAttachments)),
     stream: true,
+    // grok-4.7 returns ciphertext by default, but naming it keeps replay explicit
+    // for every reasoning model on this proxy.
+    include: ['reasoning.encrypted_content'],
   }
+  const cacheKey = promptCacheKey(options)
+  if (cacheKey) body.prompt_cache_key = cacheKey
   if (typeof options.maxTokens === 'number') body.max_output_tokens = options.maxTokens
   if (typeof options.temperature === 'number') body.temperature = options.temperature
-  if (Array.isArray(options.tools) && options.tools.length) {
-    body.tools = options.tools.map(tool => ({
-      type: 'function',
-      name: tool.name,
-      description: tool.description,
-      parameters: tool.parameters,
-    }))
-  }
-  if (options.reasoningEffort) {
-    body.reasoning = { effort: options.reasoningEffort }
-    // Same-wire requirement as openai-responses for xAI-family reasoning models:
-    // without encrypted_content, later turns cannot replay reasoning items.
-    body.include = ['reasoning.encrypted_content']
-  }
+  const tools = cacheStableTools(options.tools)
+  if (tools.length) body.tools = tools
+  if (options.reasoningEffort) body.reasoning = { effort: options.reasoningEffort }
 
   const response = await fetch(RESPONSES_URL, {
     method: 'POST',
@@ -442,6 +513,7 @@ async function* streamResponsesUnsafe(options, token) {
   let textContent = ''
   let reasoningContent = ''
   let nextIndex = 0
+  const emittedBlocks = []
   const toolBlocks = new Map()
   // The arguments.delta event carries no `name`; it is announced on
   // output_item.added / function_call_arguments.done, so remember it by call id.
@@ -489,6 +561,7 @@ async function* streamResponsesUnsafe(options, token) {
       if (!delta) return
       if (textIndex === undefined) {
         textIndex = nextIndex++
+        emittedBlocks[textIndex] = { type: 'text' }
         yield { type: 'block-start', index: textIndex, blockType: 'text' }
       }
       textContent += delta
@@ -504,6 +577,7 @@ async function* streamResponsesUnsafe(options, token) {
       if (!delta) return
       if (reasoningIndex === undefined) {
         reasoningIndex = nextIndex++
+        emittedBlocks[reasoningIndex] = { type: 'reasoning' }
         yield { type: 'block-start', index: reasoningIndex, blockType: 'reasoning' }
       }
       reasoningContent += delta
@@ -512,6 +586,14 @@ async function* streamResponsesUnsafe(options, token) {
     }
     if (type === 'response.output_item.added' || type === 'response.output_item.done') {
       const item = payload.item
+      if (item?.type === 'reasoning' && typeof item.encrypted_content === 'string' && item.encrypted_content) {
+        if (reasoningIndex === undefined) {
+          reasoningIndex = nextIndex++
+          emittedBlocks[reasoningIndex] = { type: 'reasoning' }
+          yield { type: 'block-start', index: reasoningIndex, blockType: 'reasoning' }
+        }
+        emittedBlocks[reasoningIndex] = { type: 'reasoning', item }
+      }
       if (item?.type === 'function_call') {
         learnToolName(item.id, item.name)
         learnToolName(item.call_id, item.name)
@@ -537,6 +619,7 @@ async function* streamResponsesUnsafe(options, token) {
           name: toolNames.get(id) ?? 'tool',
           arguments: '',
         }
+        emittedBlocks[tool.index] = { type: 'tool-call' }
         toolBlocks.set(id, tool)
         yield { type: 'block-start', index: tool.index, blockType: 'tool-call' }
       }
@@ -556,6 +639,7 @@ async function* streamResponsesUnsafe(options, token) {
         if (id && !toolBlocks.has(id)) {
           const tool = { index: nextIndex++, id, name: toolNames.get(id) ?? 'tool', arguments: '' }
           toolBlocks.set(id, tool)
+          emittedBlocks[tool.index] = { type: 'tool-call' }
           yield { type: 'block-start', index: tool.index, blockType: 'tool-call' }
         }
         adoptToolArguments(id, item.arguments)
@@ -628,7 +712,14 @@ async function* streamResponsesUnsafe(options, token) {
     }
   }
   if (usage) yield { type: 'usage', usage }
-  yield { type: 'finish', reason: finish }
+  const finishChunk = { type: 'finish', reason: finish }
+  if (finish.kind !== 'error' && finish.kind !== 'aborted' && emittedBlocks.length === nextIndex) {
+    finishChunk.replayState = {
+      response: { kind: REPLAY_KIND, version: REPLAY_VERSION },
+      blocks: emittedBlocks,
+    }
+  }
+  yield finishChunk
 }
 
 /**
