@@ -26,6 +26,17 @@ export const zh = {
   logoutOk: '已退出登录',
   cliMissing: '未发现 grok CLI。请先安装官方 CLI 并运行 grok login，然后拉取。',
   caveats: '社区插件，不是官方产品。订阅用于非官方客户端可能处于供应商条款灰色地带；只使用你自己的账号。协议可能变化，因为官方文档未公开完整 HTTP wire protocol。',
+  usageTitle: '用量（实验性）',
+  usageSubtitle: '来自未文档化的订阅 billing API（/v1/billing?format=credits），仅供参考，可能随时失效。',
+  usageUsed: '已用',
+  usageRemaining: '剩余约',
+  usageReset: '周期结束 / 重置',
+  usageUnavailable: '不可用',
+  usageRefresh: '刷新用量',
+  usageOpenGrok: '在 grok.com 查看用量',
+  usageProduct: '产品明细',
+  usageFetchedAt: '最近刷新',
+  usageRefreshOk: '用量已刷新',
 }
 
 export const en = {
@@ -56,6 +67,17 @@ export const en = {
   logoutOk: 'Signed out',
   cliMissing: 'The grok CLI was not found. Install it, run grok login, then pull.',
   caveats: 'Community plugin, not an official product. Using a subscription from an unofficial client may be a vendor-ToS gray area; use your own account only. The protocol can change because official docs do not publish the full HTTP wire protocol.',
+  usageTitle: 'Usage (experimental)',
+  usageSubtitle: 'From the undocumented subscription billing API (/v1/billing?format=credits). Informational only; the endpoint may change or disappear.',
+  usageUsed: 'Used',
+  usageRemaining: 'Remaining ≈',
+  usageReset: 'Period end / reset',
+  usageUnavailable: 'Unavailable',
+  usageRefresh: 'Refresh usage',
+  usageOpenGrok: 'View usage on grok.com',
+  usageProduct: 'Product breakdown',
+  usageFetchedAt: 'Last refreshed',
+  usageRefreshOk: 'Usage refreshed',
 }
 
 export const messages = { zh, en }

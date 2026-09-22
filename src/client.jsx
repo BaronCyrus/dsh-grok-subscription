@@ -1,9 +1,12 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { en, zh } from './locales.js'
 import { CHANNEL, createRpcClient, unwrap } from './rpc-contract.js'
-import { LOCALE_NS } from './constants.js'
+import { LOCALE_NS, USAGE_PAGE_URL } from './constants.js'
 
 export const inject = ['slots', 'locale', 'connection', 'settingsScope']
+
+/** Client-side safety net so Settings never sticks on Working… forever. */
+const RPC_CALL_TIMEOUT_MS = 45_000
 
 function pickCopy(locale) {
   const language = typeof locale === 'string' ? locale : locale?.language ?? locale?.lang
@@ -18,33 +21,135 @@ function sourceLabel(source, t) {
   return t('catalogSourceSignedOut')
 }
 
+function formatPercent(value) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined
+  const rounded = Math.round(value * 10) / 10
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1)
+}
+
+async function callRpc(rpc, endpoint, payload = {}) {
+  const controller = typeof AbortController !== 'undefined' ? new AbortController() : undefined
+  let timer
+  try {
+    const call = rpc.call(CHANNEL, endpoint, payload, controller?.signal)
+    const timeout = new Promise((_, reject) => {
+      timer = setTimeout(() => {
+        try { controller?.abort() } catch { /* ignore */ }
+        reject(new Error(`Request timed out after ${RPC_CALL_TIMEOUT_MS}ms`))
+      }, RPC_CALL_TIMEOUT_MS)
+    })
+    return unwrap(await Promise.race([call, timeout]))
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+}
+
+function UsagePanel({ usage, t, busy, onRefresh, signedIn }) {
+  const ok = usage?.status === 'ok'
+  const used = ok ? formatPercent(usage.usedPercent) : undefined
+  const remaining = ok ? formatPercent(usage.remainingPercent) : undefined
+  const resetLabel = usage?.periodEndLocal || usage?.periodEnd
+
+  return (
+    <div className="usageBlock">
+      <strong>{t('usageTitle')}</strong>
+      <p className="muted">{t('usageSubtitle')}</p>
+      {ok && used !== undefined ? (
+        <>
+          <p>
+            {t('usageUsed')}: <strong>{used}%</strong>
+            {remaining !== undefined ? <> · {t('usageRemaining')} {remaining}%</> : null}
+          </p>
+          {resetLabel ? (
+            <p className="muted">
+              {t('usageReset')}: {resetLabel}
+              {usage.periodEnd && usage.periodEndLocal ? <> (<code>{usage.periodEnd}</code>)</> : null}
+            </p>
+          ) : null}
+          {Array.isArray(usage.productUsage) && usage.productUsage.length > 0 ? (
+            <div>
+              <p className="muted">{t('usageProduct')}</p>
+              <ul>
+                {usage.productUsage.map((row, index) => (
+                  <li key={`${row.name ?? 'row'}-${index}`}>
+                    {row.name ?? '—'}
+                    {typeof row.usedPercent === 'number' ? ` · ${formatPercent(row.usedPercent)}%` : ''}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          {usage.fetchedAt ? <p className="muted">{t('usageFetchedAt')}: {usage.fetchedAt}</p> : null}
+        </>
+      ) : (
+        <p>
+          {t('usageUnavailable')}
+          {usage?.reason ? `: ${usage.reason}` : ''}
+        </p>
+      )}
+      <div className="row">
+        <button type="button" disabled={Boolean(busy) || !signedIn} onClick={onRefresh}>
+          {t('usageRefresh')}
+        </button>
+        <a href={USAGE_PAGE_URL} target="_blank" rel="noreferrer">{t('usageOpenGrok')}</a>
+      </div>
+    </div>
+  )
+}
+
 export function GrokSubscriptionSection({ rpc, t }) {
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [status, setStatus] = useState(undefined)
+  const initialUsageKick = useRef(false)
+
+  const applyPartial = (value) => {
+    if (value?.account || value?.catalog || value?.usage) {
+      setStatus(current => ({ ...current, ...value }))
+    }
+  }
 
   const load = async () => {
-    const value = unwrap(await rpc.call(CHANNEL, 'status', {}))
+    const value = await callRpc(rpc, 'status', {})
     setStatus(value)
     setError('')
+    return value
   }
 
   useEffect(() => {
-    void load().catch(item => {
-      setNotice('')
-      setError(item instanceof Error ? item.message : String(item))
-    })
+    void load()
+      .then(value => {
+        // One non-blocking usage refresh on first Settings open when signed in.
+        if (initialUsageKick.current) return
+        if (value?.account?.signedIn !== true) return
+        initialUsageKick.current = true
+        void callRpc(rpc, 'usage/refresh', {})
+          .then(partial => {
+            applyPartial(partial)
+          })
+          .catch(() => {
+            // Fail soft: leave cached / Not fetched yet.
+          })
+      })
+      .catch(item => {
+        setNotice('')
+        setError(item instanceof Error ? item.message : String(item))
+      })
   }, [rpc])
 
   const run = async (endpoint) => {
     setBusy(endpoint)
     setError('')
     setNotice('')
+    let value
     try {
-      const value = unwrap(await rpc.call(CHANNEL, endpoint, {}))
-      if (value?.account || value?.catalog) setStatus(current => ({ ...current, ...value }))
-      else await load()
+      value = await callRpc(rpc, endpoint, {})
+      if (value?.account || value?.catalog || value?.usage) {
+        applyPartial(value)
+      } else {
+        await load()
+      }
       if (value?.ok === false && value.error) {
         setNotice('')
         setError(value.error)
@@ -54,6 +159,7 @@ export function GrokSubscriptionSection({ rpc, t }) {
           'login/cli': 'loginOk',
           'login/device': 'loginOk',
           logout: 'logoutOk',
+          'usage/refresh': 'usageRefreshOk',
         }[endpoint]
         if (successKey) setNotice(t(successKey))
       }
@@ -62,6 +168,27 @@ export function GrokSubscriptionSection({ rpc, t }) {
       setError(item instanceof Error ? item.message : String(item))
     } finally {
       setBusy('')
+    }
+
+    // After a successful pull/login, refresh usage separately so Pull never
+    // blocks on billing and the UI still gets a fresh usage panel.
+    const shouldRefreshUsage = (
+      (endpoint === 'pull' || endpoint === 'login/cli' || endpoint === 'login/device')
+      && value?.ok !== false
+      && !value?.error
+    )
+    if (shouldRefreshUsage) {
+      setBusy('usage/refresh')
+      try {
+        const usageValue = await callRpc(rpc, 'usage/refresh', {})
+        applyPartial(usageValue)
+        if (usageValue?.ok !== false) setNotice(t('usageRefreshOk'))
+      } catch (item) {
+        // Keep pull success notice; surface usage error only if no other error.
+        setError(current => current || (item instanceof Error ? item.message : String(item)))
+      } finally {
+        setBusy('')
+      }
     }
   }
 
@@ -77,11 +204,13 @@ export function GrokSubscriptionSection({ rpc, t }) {
         .grokSubscription h2 { margin: 0 0 4px; font-size: 1.15rem; }
         .grokSubscription p, .grokSubscription li { line-height: 1.5; }
         .grokSubscription .muted { opacity: 0.78; font-size: 0.92rem; }
-        .grokSubscription .row { display: flex; flex-wrap: wrap; gap: 8px; }
+        .grokSubscription .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
         .grokSubscription button { cursor: pointer; }
         .grokSubscription .error { color: #b42318; }
         .grokSubscription .notice { color: #067647; }
         .grokSubscription ul { margin: 0; padding-left: 1.2rem; }
+        .grokSubscription .usageBlock { display: grid; gap: 8px; padding: 10px 0; border-top: 1px solid color-mix(in srgb, currentColor 18%, transparent); }
+        .grokSubscription a { color: inherit; }
       `}</style>
       <div>
         <h2>{t('title')}</h2>
@@ -104,6 +233,13 @@ export function GrokSubscriptionSection({ rpc, t }) {
       <p className="muted">{t('deviceHint')}</p>
       <p className="muted">{t('pullHint')}</p>
       {status?.cliAvailable === false ? <p className="muted">{t('cliMissing')}</p> : null}
+      <UsagePanel
+        usage={status?.usage}
+        t={t}
+        busy={busy}
+        signedIn={signedIn}
+        onRefresh={() => void run('usage/refresh')}
+      />
       <div>
         <strong>{t('models')}</strong>
         <p className="muted">{sourceLabel(catalog?.source, t)}</p>
@@ -143,4 +279,4 @@ export function apply(ctx) {
   }, GrokSubscriptionSection))
 }
 
-export { pickCopy }
+export { pickCopy, callRpc, RPC_CALL_TIMEOUT_MS }
