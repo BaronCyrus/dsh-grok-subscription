@@ -1,194 +1,264 @@
-# dsh-grok-subscription
+# DSH Grok Subscription — 在 DeepSeek Harness 使用 SuperGrok / X Premium 订阅
 
-一个第一方形态的 **DeepSeek Harness 社区插件**：复用官方 Grok Build CLI 的 SuperGrok / X Premium 登录，在 DSH 中提供独立的 `grok-build` 模型路由，不覆盖 DSH 内置的 `xai` API-key 路由。
+<div align="center">
 
-## 它做什么
+**简体中文** · [English](https://github.com/BaronCyrus/dsh-grok-subscription/blob/main/README.en.md)
 
-- 读取 `${GROK_HOME:-~/.grok}/auth.json` 中的 OAuth 会话（不接受纯 API-key 项作为订阅登录）。
-- 通过 DSH credentials 仅保存短期 access token；refresh token 不离开 Grok CLI 文件。
-- 推理使用 OpenAI Responses：`https://cli-chat-proxy.grok.com/v1/responses`，不是 `api.x.ai`。
-- 登录后从 `GET https://cli-chat-proxy.grok.com/v1/models-v2` 获取账号可用模型；实时目录不可用或为空时使用小型静态目录（包含 `grok-4.7`）。`grok-4.7` 优先来自实时 `models-v2` 返回。
-- 未登录时仍注册 adapter，但模型列表为 **0**（fail closed）。
-- 设置页显示脱敏账户、登录状态、模型与最近一次目录错误，并提供 CLI 登录、设备码登录、从 Grok CLI 拉取、退出登录。
-- **实验性用量显示**：登录后从未文档化的 `GET /v1/billing?format=credits` 读取 `config.creditUsagePercent`（兼容顶层）与周期结束时间；失败时显示「不可用」且**绝不编造百分比**。不影响 Chat。
-- Pull / 登录 / 退出 / 目录刷新后通过 `llm/adapters-updated` 通知 Web 客户端刷新 Chat / New Session 模型选择器（emit 延后，避免与 Pull RPC 重入）。
-- 设置页 Pull **零出站网络、内存优先**：只读本地 auth.json，同步写入 `memoryAccessToken` 后立即返回；credentials.set / credentialRef 延后（带超时），不堵 Pull RPC；目录与用量由后台及客户端 fire-and-forget 的 `catalog/refresh` / `usage/refresh` 更新（不占用全局 busy）；`status` / `currentToken` 优先内存。
+**把 SuperGrok / X Premium（Grok Build）订阅直接接入 DeepSeek Harness**
 
-## 安装
+复用官方 Grok Build CLI 的登录会话，不需要 `XAI_API_KEY`。
+模型、推理档位和每周额度都留在 DSH 里。
 
-要求 Node.js `^22.19.0 || >=24`，并建议先安装官方 `grok` CLI。
+[![npm](https://img.shields.io/npm/v/dsh-grok-subscription?logo=npm&label=npm)](https://www.npmjs.com/package/dsh-grok-subscription)
+[![npm 总下载量](https://img.shields.io/npm/dt/dsh-grok-subscription?logo=npm&label=%E6%80%BB%E4%B8%8B%E8%BD%BD%E9%87%8F)](https://www.npmjs.com/package/dsh-grok-subscription)
+[![MIT](https://img.shields.io/badge/license-MIT-111111.svg)](LICENSE)
+[![Star](https://img.shields.io/github/stars/BaronCyrus/dsh-grok-subscription?style=flat&logo=github&label=Star)](https://github.com/BaronCyrus/dsh-grok-subscription/stargazers)
 
-```bash
-grok login
-# 从 GitHub 安装（推荐）
-dsh plugin --profile web add BaronCyrus/dsh-grok-subscription
-# 或本地路径
-# dsh plugin --profile web add /absolute/path/to/dsh-grok-subscription
-# 或 npm（发布后）
-# dsh plugin --profile web add dsh-grok-subscription@1.0.1
-```
+[三步开始](#三步开始) · [安装](#安装) · [更新与卸载](#更新与卸载) · [版本记录](#版本记录)
 
-然后重启 `dsh web`，打开 **Settings → Grok 订阅**。也可以在设置页点击“CLI 登录”或“设备码登录”；设备码流程会在启动 DSH 的终端中显示提示。登录完成后点击“从 Grok CLI 拉取”可立即同步；Chat 模型列表会随之刷新。
+</div>
 
-升级到新版本后请重新安装插件（`add` 同一路径）并重启 `dsh web`，否则会继续跑旧的 `lib/`。
+<p align="center">
+  <img src="docs/assets/grok-subscription-overview.webp" width="900" alt="在 DeepSeek Harness 中选择 Grok 4.7 并使用 SuperGrok 订阅进行多轮对话">
+</p>
 
-若权限不正确：
+## 三步开始
 
-```bash
+1. **安装插件**：在终端运行下面的命令；指定候选版本时填写完整的 `包名@版本`，例如 `dsh-grok-subscription@1.0.1`。
+
+   ```sh
+   dsh plugin --profile web add BaronCyrus/dsh-grok-subscription
+   ```
+
+2. **登录订阅**：打开 **设置 → Grok 订阅**，点击 **CLI 登录** 或 **设备码登录**，在启动 DSH 的终端里完成官方提示。已经自己跑过 `grok login` 的话，直接点 **从 Grok CLI 拉取** 即可，不需要粘贴任何 token。
+3. **开始使用**：在模型选择器中选择 Grok 4.7 等模型。输入框旁的圆形徽章显示每周剩余额度，模型菜单里有推理档位。
+
+安装或升级后需要重启 `dsh web`，否则会继续运行旧的 `lib/`。
+
+## 核心优势
+
+| 能力 | 用户得到什么 |
+| --- | --- |
+| **订阅直连** | 复用官方 Grok Build CLI 会话，不需要 `XAI_API_KEY` |
+| **真实模型目录** | 登录后从 `/v1/models-v2` 读取账号实际可用的模型（如 `grok-4.7`、`grok-4.6`、`grok-4.5`）；未登录时不暴露任何模型 |
+| **推理档位** | 模型选择器内置 `low` / `medium` / `high` / `xhigh` 子菜单，默认 `high`，与 Codex 的交互一致 |
+| **输入框额度** | 模型选择器旁的徽章直接显示每周剩余比例，悬停或点击查看「每周额度 剩余 N% · 重置于 M/D HH:mm」 |
+| **用量面板（实验性）** | 设置页显示服务端返回的已用与剩余百分比，读取失败时不猜数字、不虚构额度 |
+| **凭据留在本机** | 只在主机侧读取 `~/.grok/auth.json` 的短期 access token；不会把 token 交给浏览器 RPC |
+| **登录状态会刷新界面** | 登录、拉取或登出后自动派发 `llm/adapters-updated`，Chat 模型列表随之更新 |
+| **失败可见** | 订阅路由不可用时明确报错，不会静默改用其他付费路由 |
+
+这些能力共用同一份本机 Grok Build 登录。
+
+## 实际界面
+
+<p align="center">
+  <img src="docs/assets/settings-account.webp" width="820" alt="DSH 设置中的 Grok 订阅页面：登录状态、账号、登录按钮与凭据说明">
+</p>
+
+上图为 **设置 → Grok 订阅** 主界面：显示登录状态与脱敏账号，提供 CLI 登录、设备码登录、从 Grok CLI 拉取和登出，并说明凭据的读取方式。截图中的账号与时间均为演示数据。
+
+<p align="center">
+  <img src="docs/assets/settings-usage.webp" width="820" alt="Grok 订阅设置页中的实验性用量面板：已用 6%、剩余约 94%">
+</p>
+
+实验性用量面板来自未公开的订阅计费接口（`/v1/billing?format=credits`）。它仅供参考：接口可能随时变化或消失，读取失败时不会显示编造的百分比，也不影响聊天。
+
+## 准备 DSH
+
+本插件支持软件包元数据中记录的最新版 DeepSeek Harness，并需要一个具有 Grok Build 使用资格的 **SuperGrok 或 X Premium** 账号。
+
+- **已经能运行 `dsh`**：直接使用下面的标准命令；
+- **想按官方方式运行**：查看 [DeepSeek Harness 官方说明](https://github.com/deepseek-ai/deepseek-harness#run)。
+
+插件读取 `~/.grok/auth.json` 时较为严格：拒绝符号链接、拒绝组或其他用户可读的文件、拒绝非当前用户拥有的文件。如果权限不正确：
+
+```sh
 chmod 600 "${GROK_HOME:-$HOME/.grok}/auth.json"
 ```
 
-开发检查：
+## 安装
 
-```bash
+### DSH 标准命令
+
+```sh
+dsh plugin --profile web add BaronCyrus/dsh-grok-subscription
+```
+
+也可以按 npm 上的已发布版本安装：
+
+```sh
+dsh plugin --profile web add dsh-grok-subscription@1.0.1
+```
+
+目标选择、profile 锁、依赖解析和 bundle 激活均由 DSH 负责。
+
+### Headless
+
+先在 Web 中完成登录并选择一次 Grok 模型，再把同一个插件安装到 DSH 的标准 Headless profile：
+
+```sh
+dsh plugin --profile headless add BaronCyrus/dsh-grok-subscription
+dsh --profile headless "只回复：ok"
+```
+
+<details>
+<summary>官方 npm 方式（已安装 Node.js）</summary>
+
+官方的 `npx @deepseek-ai/dsh web` 不会创建全局 `dsh` 命令，因此安装插件时也要保留完整的 `npx` 前缀：
+
+```sh
+npx -y @deepseek-ai/dsh@0.1.5-rc.2 plugin --profile web add BaronCyrus/dsh-grok-subscription
+npx -y @deepseek-ai/dsh@0.1.5-rc.2 plugin --profile web list dsh-grok-subscription --depth 0
+npx -y @deepseek-ai/dsh@0.1.5-rc.2 --profile web --dump-config
+```
+
+</details>
+
+<details>
+<summary>已经能运行 <code>dsh</code> 时检查安装结果</summary>
+
+```sh
+dsh plugin --profile web list dsh-grok-subscription --depth 0
+dsh --profile web --dump-config
+```
+
+安装列表中应只有一个 `dsh-grok-subscription`，配置中应只有一个 `grok-build` 路由。
+
+</details>
+
+安装完成后手动重启 DSH，然后：
+
+1. 打开 **设置 → Grok 订阅**；
+2. 登录具有 Grok Build 资格的账号（浏览器登录或设备码登录）；
+3. 在模型选择器中选择 Grok 模型。
+
+## 功能
+
+- 复用官方 Grok Build CLI 会话登录，凭据保留在本机；账号以部分隐藏的邮箱区分；
+- 模型直接出现在 DSH 会话中，无需 `XAI_API_KEY`，也不向浏览器暴露 token；
+- 模型目录登录后自动拉取；读取失败或超时时回退到内置列表并记录错误，未登录时保持为空；
+- 模型菜单提供 `low` / `medium` / `high` / `xhigh` 推理档位，默认 `high`；
+- 输入框模型选择器旁显示每周剩余额度徽章，悬停或点击查看剩余比例与重置时间；
+- 设置页可查看服务端返回的用量与剩余百分比，失败时明确提示而不是显示猜测值；
+- 支持 CLI 登录、设备码登录、从 Grok CLI 拉取和登出；登录状态变化后 Chat 模型列表自动刷新；
+- 订阅路由不可用时明确报错，不会静默切换到其他付费路由。
+
+### 输入框额度
+
+<p align="center">
+  <img src="docs/assets/composer-quota.webp" width="820" alt="DSH 输入框：Grok 4.7 模型选择器旁的每周剩余额度徽章">
+</p>
+
+仅当当前会话的 provider 为 `grok-build` 且用量读取成功时显示徽章；悬停或点击可查看「每周额度 剩余 N% · 重置于 M/D HH:mm」。徽章只反映服务端返回的每周额度；读取失败时徽章不显示，聊天不受影响。
+
+### 推理档位
+
+选择 Grok 模型后，模型菜单里会出现推理档位子菜单：`low` / `medium` / `high` / `xhigh`，默认 `high`。档位通过 `model.reasoning`（`efforts` + `defaultEffort`）元数据提供，因此与 Codex 在 DSH 中的交互一致；具体可用档位以账号模型目录为准。
+
+### 模型目录与登录状态
+
+登录后插件从订阅代理读取账号实际可用的模型目录；未登录时不注册任何模型。读取失败或超时时回退到内置列表（`grok-4.7` / `grok-4.6` / `grok-4.5`）并在状态里记录错误，因此目录不会留空，也不会让插件启动卡住。
+
+## 更新与卸载
+
+### 更新并检查
+
+```sh
+dsh plugin --profile web update dsh-grok-subscription
+dsh plugin --profile web list dsh-grok-subscription --depth 0
+dsh --profile web --dump-config
+```
+
+### 卸载
+
+确认需要移除插件后再运行：
+
+```sh
+dsh plugin --profile web remove dsh-grok-subscription
+```
+
+这些操作会保留 DSH profile、其他插件和 `~/.grok/auth.json` 中的登录信息。
+
+<details>
+<summary>官方 npm 备用方式</summary>
+
+```sh
+npx -y @deepseek-ai/dsh@0.1.5-rc.2 plugin --profile web update dsh-grok-subscription
+npx -y @deepseek-ai/dsh@0.1.5-rc.2 plugin --profile web remove dsh-grok-subscription
+```
+
+</details>
+
+## 常见问题
+
+- **`dsh` 无法识别**：官方 npm 方式本来就不会创建全局 `dsh` 命令，请使用上面的完整 `npx -y @deepseek-ai/dsh@0.1.5-rc.2 ...` 命令；
+- **模型列表是空的**：未登录时插件不暴露任何模型。先完成登录，再点 **从 Grok CLI 拉取**；
+- **升级后界面没变化**：插件会继续运行旧的 `lib/`，请重新安装插件并重启 `dsh web`，然后硬刷新（Ctrl+Shift+R）；
+- **提示 `auth.json` 权限不正确**：按上面的 `chmod 600` 处理；插件拒绝读取符号链接或组/其他用户可读的文件；
+- **出现「没有回复」**：请升级到 `1.0.1` 或更高版本。`1.0.0` 存在一个缺陷：工具调用轮次会因流片段无法无损序列化而整轮中止，界面上完全没有回复。
+
+## 边界与支持
+
+Grok 订阅后端和 DSH 可能独立变化；本项目为社区项目，与 DeepSeek、xAI 无隶属或背书关系。
+
+敏感问题请先阅读 [SECURITY.md](SECURITY.md)。问题反馈请使用 [Issues](https://github.com/BaronCyrus/dsh-grok-subscription/issues)。
+
+### 开发检查
+
+```sh
 npm install
 npm test
 npm run build
 ```
 
-## v1.0.1
+`lib/` 是提交进仓库的构建产物，改动 `src/` 后请运行 `npm run build`。
 
-修复 grok-build 路由「发第二条消息没有回复」：`/v1/responses` 只在 `response.output_item.added` 与 `function_call_arguments.done` 上给函数名，参数增量事件不带 `name`，于是工具调用块带着 `name: undefined` 发给宿主。DSH 会拒绝任何无法无损 JSON 序列化的流片段，并以「Assistant stream chunk must be losslessly JSON-serializable」结束整轮，界面上完全没有回复——走 grok-build 的工具调用轮次都会这样，纯文本回复则正常。现：按 call id 记住工具名；采用 `arguments.done` / `response.completed` 的权威参数；从终止快照恢复只出现在 `completed` 里的调用；用量合计保持有限值、错误状态仅在其为数字时附带；出口再统一剔除 `undefined` / 非有限值兜底。附 8 个基于真实抓包帧的回归测试。
+## 版本记录
 
-## v1.0.0
-
-首个稳定版，已发布 npm：`dsh-grok-subscription@1.0.0`。内置模型选择器现可通过 `model.reasoning`（efforts + defaultEffort）展示 Grok Build 的 reasoning effort 子菜单（low/medium/high/xhigh），与 Codex 一致。修复 duck `listModels`/`resolveModel` 此前省略该元数据的问题。
-
-## v0.1.13
-
-Chat 输入区模型选择旁增加 Codex 风格的每周剩余额度徽章（如 `16%`）；悬停/点击显示「每周额度 剩余 N% · 重置于 M/D HH:mm」。仅在当前会话 provider 为 `grok-build` 且用量 `ok` 时显示。Settings 中 Pull/登录成功后会派发刷新事件更新徽章。已发布 npm：`dsh-grok-subscription@0.1.13`。升级后请用新 token URL 硬刷新。
-
-## v0.1.12
-
-升级后请用 `dsh web` 新打印的带 token URL 打开，并硬刷新（Ctrl+Shift+R），避免旧 `/plugins` client 缓存。
-
-修复 0.1.11 实机：Settings → Plugins 仍卡在「Reading plugins…」，Pull 等到客户端 45s 超时。根因是 `status` / `currentToken` 仍可能无超时地 `await credentials.resolve` 与裸 `import('@deepseek-ai/dsh-credentials')`，楔住连接桥后 Plugins 清单也跟着挂。现：`credentialRefOf` 用 timed `optionalImport`；resolve 硬超时（默认 1.5s）；`status` 先内存 / auth.json，再可选 credentials；宿主 RPC 每端点 8s 硬超时；`llm/adapters-updated` 一律延后；`inject` 保持 `['llm','web']`；客户端缺 connection 软跳过，RPC 客户端超时降至 12s。已发布 npm：`dsh-grok-subscription@0.1.12`。
-
-## v0.1.10
-
-修复 0.1.9 实机：Pull 仍可能 45s 超时，且 **Settings → Plugins** 卡在 `Reading plugins…`（宿主 Settings/RPC 通道被楔住）。根因是 `apply`/`boot` 路径会 `await` 无超时的动态 `import`（`pi-ai` / `dsh-llm-pi-ai` / schemastery），且 `inject` 含 sticky 的 `credentials`。现 `inject` 收窄为 `['llm','web']`；`apply` 同步注册 duck adapter 后立即返回；schemastery / `session.pull` / pi-ai 升级全部 `setImmediate` 延后；所有动态 import 硬超时（默认 2.5s），超时则保持 duck。保留 0.1.9 内存优先 Pull 与 0.1.8 客户端 fire-and-forget。
-
-## v0.1.9
-
-修复 0.1.8 实机：Pull RPC 本身卡到客户端 45s 超时。根因是零网络 Pull 仍 `await storeToken` → `credentialRefOf()`（动态 import `@deepseek-ai/dsh-credentials`）无超时，import/set 与 DSH credentials 死锁时会拖死整个 Pull。现会话服务持有 `memoryAccessToken`；Pull 成功路径同步写入内存后立即返回，credentials 持久化与 clear 全部 `scheduleDeferred`；`currentToken` / `status` 优先内存。客户端仍保持 0.1.8 的 fire-and-forget 刷新行为。
-
-## v0.1.8
-
-修复 0.1.7 实机：Pull 成功后客户端仍 await `usage/refresh` 并占用全局 busy，导致 Working… 卡住、按钮一直 disabled。现 Pull/登录成功后立即清 busy 并显示成功提示；`catalog/refresh` 与 `usage/refresh` 为 fire-and-forget（不置全局 busy）。仅「刷新用量」按钮使用本地 `usageBusy`。`fetchBillingUsage` 增加独立于 AbortSignal 的硬 `Promise.race` 超时（默认 8s）；空 JSON `{}` 与非 JSON Content-Type 会写入更明确的不可用原因。
-
-## v0.1.7
-
-修复设置页 Pull 仍卡住 Working…（0.1.6 去掉 billing 后仍可能卡在 `credentials.set` 或 `loadCatalog`）：Pull 关键路径**零出站网络**，`storeToken` 硬超时（默认 5s），立即返回缓存目录/用量；后台 kick `refreshCatalog` + `refreshUsage`；客户端在 Pull 成功后另行 `catalog/refresh` 与 `usage/refresh`（独立 busy 文案）。`notifyCatalogChange` 仍仅延后触发。
-
-## v0.1.6
-
-修复设置页 Pull 卡住 Working…、用量长期「不可用」：Pull 关键路径不再等待 billing；`status()` 只返回缓存用量；Pull 成功后由客户端另行 `usage/refresh`；`llm/adapters-updated` 延后发出；客户端 RPC 增加超时保护。解析逻辑仍沿用 0.1.5 的 config.* 兼容。
-
-## v0.1.5
-
-修复实验性用量解析：官方 `/v1/billing?format=credits` 实际把 `creditUsagePercent`、`currentPeriod`、`productUsage` 放在 `config` 下（非顶层）。0.1.4 因严格读顶层字段在 QA 中显示「不可用」。现同时接受 `config.*` 与顶层；不可用原因会附带顶层 key 名以便排查。**绝不编造百分比。**
-
-## v0.1.4
-
-实验性 SuperGrok 周用量显示：设置页新增「用量（实验性）」区块，只读请求 `GET https://cli-chat-proxy.grok.com/v1/billing?format=credits`（与现有 OAuth + CLI fingerprint 请求头相同）。解析 `config.creditUsagePercent` / 顶层 `creditUsagePercent` 与 `config.currentPeriod.end`；RPC 提供 `usage` / `usage/refresh`，永不回传 token。失败 fail-closed 为「不可用」。**账单 API 未公开文档，可能随时变更。**
-
-## v0.1.3
-
-修复多轮 Chat 中助手正文不显示的问题：自定义 Responses 流在 `block-end` 时把已累计的 text/reasoning 写成空字符串，Harness `BlockAssembler` 会用空块覆盖流式增量，导致第 2 轮起界面只见思考（如 “Deep diving…”）不见正文。同时为 `grok-build` 强制 `include: reasoning.encrypted_content`（与 pi-ai 对 `xai` 的处理对齐），保证推理密文可回放。
-
-## v0.1.2
-
-设置页 Pull / 登录 / 退出成功后显示明确的内联成功反馈。
-
-## v0.1.1
-
-修复 Chat / New Session 模型选择器在 Settings 已 Pull 到 `models-v2` 后仍只显示 DeepSeek 模型的问题：
-
-- PiAiAdapter 的 `profiles` 每次重建 provider，且 `getModels()` 读取当前 `session.models()`（不再依赖一次性的 `models: []` + `fetchModels`）。
-- Pull / 登录 / 退出 / 目录刷新后发出 `llm/adapters-updated`，让选择器刷新。
-
-v0.1.0 范围仍适用：仅文本/工具调用所需的 Responses 流、账号同步、动态模型目录和设置页。没有图片生成、画板、额度预测或 Codex 功能。官方 CLI 负责登录与 refresh-token 生命周期；插件不会实现或写回供应商 OAuth refresh。
-
-## 注意事项
-
-- 这是社区插件，不是 xAI、Grok 或 DeepSeek 官方产品。
-- 订阅账号用于非官方客户端可能处于供应商条款灰色地带；**只使用你自己的账号**，风险自担。
-- 官方文档没有发布完整 HTTP wire protocol；代理协议、请求头、模型 ID 或权限规则可能随时改变。
-- 用量面板依赖的 `/v1/billing?format=credits` **未公开文档**，属实验性功能；字段形状或可用性可能变化，失败时仅显示不可用。
-- 设置页发起 CLI 登录时，浏览器/设备码提示由官方 CLI 处理；远程部署请优先用 `grok login --device-auth`。
-
-## English
-
-`dsh-grok-subscription` is a small community DSH plugin that reuses an official Grok Build CLI SuperGrok/X Premium session. It adds a separate `grok-build` route, calls the subscription Responses proxy, discovers models from `/v1/models-v2` (with a signed-in-only fallback including `grok-4.7`), and never exposes tokens to browser RPC. Settings also shows an **experimental** weekly usage panel from the undocumented `/v1/billing?format=credits` endpoint (fail-closed; never invents percentages; chat is unaffected). After Pull/login/logout the plugin emits `llm/adapters-updated` so the Chat model picker refreshes. Install locally with:
-
-```bash
-dsh plugin --profile web add BaronCyrus/dsh-grok-subscription
-```
-
-Reinstall after upgrades, restart `dsh web`, then open **Settings → Grok Subscription**.
+<details>
+<summary>展开历史版本</summary>
 
 ### v1.0.1
 
-Fixes "no reply after sending a second message" on the grok-build route: `/v1/responses` sends the function name only on `response.output_item.added` and `function_call_arguments.done`, never on the arguments delta, so tool-call chunks carried `name: undefined`. DSH rejects any stream chunk that is not losslessly JSON-serializable and ends the whole turn with "Assistant stream chunk must be losslessly JSON-serializable", leaving no reply in the UI; every tool-calling turn over grok-build failed this way while text-only replies looked fine. Now tool names are remembered by call id, arguments are adopted from `arguments.done` / `response.completed`, calls that appear only in the terminal snapshot are recovered, usage totals stay finite, an error status is attached only when numeric, and outgoing chunks are pruned of `undefined` / non-finite values. Adds 8 regression tests built from real captured frames.
+修复 grok-build 路由「发第二条消息没有回复」：`/v1/responses` 只在 `response.output_item.added` 与 `function_call_arguments.done` 上给函数名，参数增量事件不带 `name`，于是工具调用块带着 `name: undefined` 发给宿主。DSH 会拒绝任何无法无损 JSON 序列化的流片段，并以「Assistant stream chunk must be losslessly JSON-serializable」结束整轮，界面上完全没有回复——走 grok-build 的工具调用轮次都会这样，纯文本回复则正常。现：按 call id 记住工具名；采用 `arguments.done` / `response.completed` 的权威参数；从终止快照恢复只出现在 `completed` 里的调用；用量合计保持有限值、错误状态仅在其为数字时附带；出口再统一剔除 `undefined` / 非有限值兜底。附 8 个基于真实抓包帧的回归测试。
 
 ### v1.0.0
 
-First stable release, published to npm as `dsh-grok-subscription@1.0.0`. Stock model picker now shows Grok Build reasoning effort (low/medium/high/xhigh) via `model.reasoning` metadata (`efforts` + `defaultEffort`), matching Codex. Fixes duck `listModels`/`resolveModel` omitting that shape.
+首个稳定版。内置模型选择器现可通过 `model.reasoning`（efforts + defaultEffort）展示 Grok Build 的 reasoning effort 子菜单（low/medium/high/xhigh），与 Codex 一致。修复 duck `listModels`/`resolveModel` 此前省略该元数据的问题。
 
 ### v0.1.13
 
-Chat 输入区模型选择旁增加 Codex 风格的每周剩余额度徽章（如 `16%`）；悬停/点击显示「每周额度 剩余 N% · 重置于 M/D HH:mm」。仅在当前会话 provider 为 `grok-build` 且用量 `ok` 时显示。Settings 中 Pull/登录成功后会派发刷新事件更新徽章。已发布 npm：`dsh-grok-subscription@0.1.13`。升级后请用新 token URL 硬刷新。
+Chat 输入区模型选择旁增加 Codex 风格的每周剩余额度徽章（如 `16%`）；悬停/点击显示「每周额度 剩余 N% · 重置于 M/D HH:mm」。仅在当前会话 provider 为 `grok-build` 且用量 `ok` 时显示。Settings 中 Pull/登录成功后会派发刷新事件更新徽章。升级后请用新 token URL 硬刷新。
 
-## v0.1.12
+### v0.1.12
 
-After upgrading, open the fresh token URL from `dsh web` and hard-refresh (Ctrl+Shift+R) so the old immutable `/plugins` client is not reused.
+修复 0.1.11 实机：Settings → Plugins 仍卡在「Reading plugins…」，Pull 等到客户端 45s 超时。根因是 `status` / `currentToken` 仍可能无超时地 `await credentials.resolve` 与裸 `import('@deepseek-ai/dsh-credentials')`，楔住连接桥后 Plugins 清单也跟着挂。现：`credentialRefOf` 用 timed `optionalImport`；resolve 硬超时（默认 1.5s）；`status` 先内存 / auth.json，再可选 credentials；宿主 RPC 每端点 8s 硬超时；`llm/adapters-updated` 一律延后；`inject` 保持 `['llm','web']`；客户端缺 connection 软跳过，RPC 客户端超时降至 12s。
 
-修复 0.1.11 实机：Settings → Plugins 仍卡在「Reading plugins…」，Pull 等到客户端 45s 超时。根因是 `status` / `currentToken` 仍可能无超时地 `await credentials.resolve` 与裸 `import('@deepseek-ai/dsh-credentials')`，楔住连接桥后 Plugins 清单也跟着挂。现：`credentialRefOf` 用 timed `optionalImport`；resolve 硬超时（默认 1.5s）；`status` 先内存 / auth.json，再可选 credentials；宿主 RPC 每端点 8s 硬超时；`llm/adapters-updated` 一律延后；`inject` 保持 `['llm','web']`；客户端缺 connection 软跳过，RPC 客户端超时降至 12s。已发布 npm：`dsh-grok-subscription@0.1.12`。
+### v0.1.10
 
-## v0.1.10
-
-Fixes 0.1.9 live hang: Pull could still hit the 45s client timeout, and **Settings → Plugins** stuck on `Reading plugins…` (host Settings/RPC channel wedged). Root cause: `apply`/`boot` awaited untimed dynamic `import`s (`pi-ai` / `dsh-llm-pi-ai` / schemastery), and `inject` listed sticky `credentials`. Now `inject` is `['llm','web']`; `apply` synchronously registers a duck adapter and returns; schemastery / `session.pull` / pi-ai upgrade are deferred via `setImmediate`; every dynamic import has a hard timeout (default 2.5s) and falls back to duck. Keeps 0.1.9 memory-first Pull and 0.1.8 client fire-and-forget.
+修复 0.1.9 实机卡住：Pull 仍可能撞上客户端 45s 超时，**Settings → Plugins** 卡在 `Reading plugins…`（宿主 Settings/RPC 通道被楔住）。根因：`apply`/`boot` 无超时地 `await` 动态 `import`（`pi-ai` / `dsh-llm-pi-ai` / schemastery），且 `inject` 列了粘性的 `credentials`。现：`inject` 为 `['llm','web']`；`apply` 同步注册 duck adapter 后立即返回；schemastery / `session.pull` / pi-ai 升级通过 `setImmediate` 延后；每个动态 import 都有硬超时（默认 2.5s）并回退到 duck。
 
 ### v0.1.9
 
-Fixes 0.1.8 live hang where the Pull RPC itself hit the client 45s timeout: zero-network Pull still awaited `storeToken` → `credentialRefOf()` (dynamic import of `@deepseek-ai/dsh-credentials`) with no timeout, so a credentials import/set deadlock stalled Pull. Session now keeps `memoryAccessToken`; success Pull writes memory and returns immediately, deferring credential persist/clear; `currentToken` / `status` prefer memory. Keeps 0.1.8 client fire-and-forget refresh behavior.
+修复 0.1.8 实机卡住：零网络 Pull 仍会 `await` `storeToken` → `credentialRefOf()`（动态 import `@deepseek-ai/dsh-credentials`）且无超时。现 session 保留 `memoryAccessToken`；成功的 Pull 写入内存后立即返回，凭据持久化/清除延后；`currentToken` / `status` 优先读内存。
 
 ### v0.1.8
 
-Fixes 0.1.7 live hang: after Pull the client no longer awaits `usage/refresh` while holding global busy (Working… / all buttons disabled). Pull/login clear busy and show success immediately; catalog + usage refresh are fire-and-forget. Only the Usage Refresh button uses local `usageBusy`. `fetchBillingUsage` has a hard Promise.race timeout (default 8s) independent of AbortSignal; empty `{}` and non-JSON Content-Type get clearer unavailable reasons.
+Pull 不再等到客户端 45s 超时才结束：计费查询有硬超时，Pull 忙碌状态立即解除，避免 Settings 一直转圈。
 
-### v0.1.7
-Fixes Settings Pull hang after 0.1.6: zero-network Pull path, `storeToken` hard timeout (default 5s), returns cached catalog/usage immediately; background kick of `refreshCatalog` + `refreshUsage`; client follows up with `catalog/refresh` and `usage/refresh`. Catalog notify stays deferred.
+### v0.1.6
 
-## v0.1.6
-Fixes Settings Pull hang (Working…) and stale Unavailable usage: Pull no longer awaits billing; `status()` returns cached usage only; client calls `usage/refresh` after successful Pull; catalog notify is deferred; client RPC has a safety timeout. Keeps 0.1.5 config.* parsing.
-
-### v0.1.5
-Fixes experimental usage parsing: live `/v1/billing?format=credits` nests `creditUsagePercent`, `currentPeriod`, and `productUsage` under `config` (not top-level). 0.1.4 failed QA with Unavailable. Parser now accepts `config.*` and top-level; unavailable reasons include top-level key names. Never invents percentages.
-
-### v0.1.4
-Experimental SuperGrok weekly usage in Settings: read-only `GET /v1/billing?format=credits` with the same OAuth + CLI fingerprint headers; shows used % and period end; RPC `usage` / `usage/refresh` never return tokens; fail closed to Unavailable. The billing API is undocumented and may change.
+修复多轮对话中助手文本在 block-end 后消失的问题。
 
 ### v0.1.3
-Fixes multi-turn Chat where assistant body text vanished from turn 2 onward: the custom Responses SSE mapper ended text/reasoning blocks with empty strings, so Harness `BlockAssembler` replaced streamed deltas with blanks (UI could show "Deep diving…" then no body). Also forces `include: reasoning.encrypted_content` for `grok-build` so encrypted reasoning can replay on later turns. This is unofficial, may fall into a vendor-ToS gray area, and the undocumented wire protocol can change. Use your own account only.
 
-## 还需要实机验证的部分
+修复多轮对话中助手文本消失（block-end 覆盖）的问题；对齐常量与 RPC 契约。
 
-单元测试覆盖 auth.json 解析、目录解析、请求头、RPC 脱敏、signed-out 空目录与 catalog-change 回调，不访问网络。以下需要本机已安装的 DSH + 已登录 SuperGrok 才能确认：
+### v0.1.2
 
-- Settings 页槽位、locale、connection.rpc 与 DSH web client 的实际装配
-- Pull 后 Chat / New Session 是否出现 `grok-4.7` 等 `grok-build` 模型并可发起推理
-- `PiAiAdapter` 对 `grok-build` 路由的流式映射（若宿主没有 `@deepseek-ai/dsh-llm-pi-ai` / `@earendil-works/pi-ai`，插件会降级到自带的 Responses SSE MVP adapter）
-- 官方 CLI `grok login` / `grok login --device-auth` 从 Settings 按钮拉起后的终端交互
-- 实时 `GET /v1/models-v2` 是否返回 `grok-4.7`（目录为空时使用静态回退）
-- Settings「用量（实验性）」：登录后刷新是否显示已用 % 与周期结束时间；401/网络失败是否显示「不可用」且无假百分比；Chat 在用量失败时仍可正常对话
+首个可运行版本：Grok Build 订阅路由、Settings 登录/拉取与用量面板。
 
-## 致谢 / Acknowledgments
-
-- [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)
-- [dsh-kimi-subscription](https://github.com/BaronCyrus/dsh-kimi-subscription)（插件形态与发布方式参考）
-- [dsh-codex-subscription](https://github.com/WSL043/dsh-codex-subscription)
-
-## License
+</details>
 
 [MIT](LICENSE)

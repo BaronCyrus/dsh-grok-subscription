@@ -12,8 +12,10 @@
   },
   "files": [
     "lib",
+    "docs/assets",
     "cordis.patch.yml",
     "README.md",
+    "README.en.md",
     "SECURITY.md",
     "LICENSE"
   ],
