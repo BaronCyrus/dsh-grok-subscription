@@ -25,7 +25,7 @@
 
 ## 三步开始
 
-1. **安装插件**：在终端运行下面的命令；指定候选版本时填写完整的 `包名@版本`，例如 `dsh-grok-subscription@1.0.5`。
+1. **安装插件**：在终端运行下面的命令；指定候选版本时填写完整的 `包名@版本`，例如 `dsh-grok-subscription@1.0.6`。
 
    ```sh
    dsh plugin --profile web add BaronCyrus/dsh-grok-subscription
@@ -43,6 +43,7 @@
 | **订阅直连** | 复用官方 Grok Build CLI 会话，不需要 `XAI_API_KEY` |
 | **真实模型目录** | 登录后从 `/v1/models-v2` 读取账号实际可用的模型（如 `grok-4.7`、`grok-4.6`、`grok-4.5`）；未登录时不暴露任何模型 |
 | **推理档位** | 模型选择器内置 `low` / `medium` / `high` / `xhigh` 子菜单，默认 `high`，与 Codex 的交互一致 |
+| **图片输入** | `grok-4.7` / `grok-4.7-fast` / `grok-4.6` 可直接粘贴图片提问，图片由宿主的附件服务按像素与体积预算归一化 |
 | **输入框额度** | 模型选择器旁的徽章直接显示每周剩余比例，悬停或点击查看「每周额度 剩余 N% · 重置于 M/D HH:mm」 |
 | **用量面板（实验性）** | 设置页显示服务端返回的已用与剩余百分比，读取失败时不猜数字、不虚构额度 |
 | **凭据留在本机** | 只在主机侧读取 `~/.grok/auth.json` 的短期 access token；不会把 token 交给浏览器 RPC |
@@ -90,7 +91,7 @@ dsh plugin --profile web add BaronCyrus/dsh-grok-subscription
 也可以按 npm 上的已发布版本安装：
 
 ```sh
-dsh plugin --profile web add dsh-grok-subscription@1.0.5
+dsh plugin --profile web add dsh-grok-subscription@1.0.6
 ```
 
 目标选择、profile 锁、依赖解析和 bundle 激活均由 DSH 负责。
@@ -154,6 +155,12 @@ dsh --profile web --dump-config
 </p>
 
 仅当当前会话的 provider 为 `grok-build` 且用量读取成功时显示徽章；悬停或点击可查看「每周额度 剩余 N% · 重置于 M/D HH:mm」。徽章只反映服务端返回的每周额度；读取失败时徽章不显示，聊天不受影响。
+
+### 图片输入
+
+`grok-4.7`、`grok-4.7-fast` 与 `grok-4.6` 支持图片输入：在输入框粘贴或附加图片即可提问。图片由宿主的附件服务按像素与体积预算归一化后发送，超预算时降级为文本说明，而不是静默丢弃。
+
+`grok-4.5` **不在支持列表内**。实测给它一张纯红图片并询问颜色，它回答 "green"，还把黄色方块描述成「带黑边的圆」——它在编造而不是看图。插件因此不为它声明图片能力，避免输出看起来自信却完全错误的答案。
 
 ### 推理档位
 

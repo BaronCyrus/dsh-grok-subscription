@@ -25,7 +25,7 @@ Models, reasoning effort, and weekly quota all stay inside DSH.
 
 ## Three-step start
 
-1. **Install the plugin.** Run the command below; to select a candidate version, enter the full `package@version`, for example `dsh-grok-subscription@1.0.5`.
+1. **Install the plugin.** Run the command below; to select a candidate version, enter the full `package@version`, for example `dsh-grok-subscription@1.0.6`.
 
    ```sh
    dsh plugin --profile web add BaronCyrus/dsh-grok-subscription
@@ -43,6 +43,7 @@ Restart `dsh web` after installing or upgrading, otherwise the old `lib/` keeps 
 | **Direct subscription routing** | Reuse the official Grok Build CLI session — no `XAI_API_KEY` needed |
 | **Real model catalog** | Read the models the account can actually use (such as `grok-4.7`, `grok-4.6`, `grok-4.5`) from `/v1/models-v2`; nothing is exposed while signed out |
 | **Reasoning effort** | The model picker offers `low` / `medium` / `high` / `xhigh`, defaulting to `high`, matching the Codex interaction |
+| **Image input** | `grok-4.7` / `grok-4.7-fast` / `grok-4.6` accept pasted images, normalized to the host's pixel and byte budget by its attachment service |
 | **Composer quota** | A badge beside the model picker shows weekly remaining percentage; hover or click for "Weekly quota · N% left · resets M/D HH:mm" |
 | **Usage panel (experimental)** | Settings shows the used and remaining percentages the backend reports, and never invents numbers when the read fails |
 | **Credentials stay local** | Only the short-lived access token from `~/.grok/auth.json` is read on the host; no token is handed to browser RPC |
@@ -90,7 +91,7 @@ dsh plugin --profile web add BaronCyrus/dsh-grok-subscription
 You can also install the version published on npm:
 
 ```sh
-dsh plugin --profile web add dsh-grok-subscription@1.0.5
+dsh plugin --profile web add dsh-grok-subscription@1.0.6
 ```
 
 DSH handles target selection, the profile lock, dependency resolution, and bundle activation.
@@ -154,6 +155,12 @@ Restart DSH manually afterwards, then:
 </p>
 
 The badge appears only when the current session's provider is `grok-build` and the usage read succeeds; hover or click for "Weekly quota · N% left · resets M/D HH:mm". It reflects only the weekly quota the backend returns, and when the read fails the badge is simply hidden — chat is unaffected.
+
+### Image input
+
+`grok-4.7`, `grok-4.7-fast` and `grok-4.6` accept image input: paste or attach an image in the composer and ask about it. Images are normalized to the host's pixel and byte budget by its attachment service before they are sent, and an over-budget image degrades to a text description rather than being dropped silently.
+
+`grok-4.5` is **deliberately excluded**. Given a solid red image and asked its colour it answered "green", and it described a yellow square as a "circle with a black outline" — it confabulates instead of looking. The plugin therefore does not advertise image input for it, so it cannot return confident nonsense.
 
 ### Reasoning effort
 

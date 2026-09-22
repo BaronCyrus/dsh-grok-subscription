@@ -123,8 +123,17 @@ async function deferredBoot(ctx, session, notifyCatalogChange, options = {}) {
   if (options.skipUpgrade) return
 
   const createAsync = options.createAsync ?? createGrokBuildAdapter
+  // Resolved lazily: the attachment service may register after this plugin, and
+  // it is only consulted when a request actually carries an image.
+  const resolveAttachments = () => {
+    try {
+      return typeof ctx.get === 'function' ? ctx.get('attachments') : undefined
+    } catch {
+      return undefined
+    }
+  }
   try {
-    const created = await createAsync(session)
+    const created = await createAsync(session, { ...options.adapterOptions, resolveAttachments })
     if (created.kind === 'pi-ai') {
       if (created.note) ctx.logger?.warn?.(created.note)
       ctx.llm.registerAdapter([PROVIDER_ID], created.adapter)

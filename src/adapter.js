@@ -1,3 +1,8 @@
+import { existsSync, readFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
+import { homedir } from 'node:os'
+import { dirname, join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import {
   DISPLAY_NAME,
   IMPORT_TIMEOUT_MS,
@@ -9,7 +14,7 @@ import {
   RESPONSES_URL,
   STREAM_IDLE_TIMEOUT_MS,
 } from './constants.js'
-import { reasoningInfoOf, toLlmModels, toPiModels } from './catalog.js'
+import { reasoningInfoOf, supportsImageInput, toLlmModels, toPiModels } from './catalog.js'
 import { buildProxyHeaders, fingerprintHeaders } from './headers.js'
 
 function withImportTimeout(promise, ms, message) {
@@ -27,6 +32,135 @@ function withImportTimeout(promise, ms, message) {
 }
 
 /**
+ * Directories the host keeps its own dependencies in.
+ *
+ * The host owns `@earendil-works/pi-ai` and the DSH packages — the plugin only
+ * declares an optional peer relationship with them. Node resolves bare
+ * specifiers from this file's real path, which usually sits outside the host
+ * install, so a plain `import()` fails and the plugin silently degrades to its
+ * custom adapter. These roots give it a second chance.
+ */
+export function hostModuleRoots(env = process.env, argv1 = process.argv[1]) {
+  const roots = []
+  const push = dir => {
+    if (typeof dir === 'string' && dir && !roots.includes(dir)) roots.push(dir)
+  }
+  const override = env.DSH_GROK_PEER_ROOT
+  if (typeof override === 'string' && override.trim()) push(override.trim())
+  // Walk up from the running entry point (…/@deepseek-ai/dsh/lib/bin.js and
+  // friends), which also covers npx-style caches.
+  if (typeof argv1 === 'string' && argv1) {
+    let dir = dirname(argv1)
+    for (let depth = 0; depth < 6 && dir && dir !== dirname(dir); depth++) {
+      push(join(dir, 'node_modules'))
+      dir = dirname(dir)
+    }
+  }
+  const prefix = env.NPM_CONFIG_PREFIX
+  if (typeof prefix === 'string' && prefix.trim()) push(join(prefix.trim(), 'lib', 'node_modules'))
+  push(join(homedir(), '.local', 'lib', 'node_modules'))
+  const dshHome = typeof env.DSH_HOME === 'string' && env.DSH_HOME.trim()
+    ? env.DSH_HOME.trim()
+    : join(homedir(), '.dsh')
+  push(join(dshHome, 'profiles', 'node_modules'))
+  return roots
+}
+
+function splitSpecifier(specifier) {
+  const parts = specifier.split('/')
+  const take = specifier.startsWith('@') ? 2 : 1
+  return {
+    name: parts.slice(0, take).join('/'),
+    subpath: parts.length > take ? `./${parts.slice(take).join('/')}` : '.',
+  }
+}
+
+/** Pick the ESM entry out of an exports target (string or conditions object). */
+function pickExportTarget(value) {
+  if (typeof value === 'string') return value
+  if (!value || typeof value !== 'object') return undefined
+  for (const condition of ['import', 'module', 'default', 'node']) {
+    if (condition in value) {
+      const picked = pickExportTarget(value[condition])
+      if (picked) return picked
+    }
+  }
+  return undefined
+}
+
+function resolveExportsTarget(exportsField, subpath) {
+  if (typeof exportsField === 'string') return subpath === '.' ? exportsField : undefined
+  if (!exportsField || typeof exportsField !== 'object') return undefined
+  const keys = Object.keys(exportsField)
+  const isSubpathMap = keys.some(key => key === '.' || key.startsWith('./'))
+  if (!isSubpathMap) return subpath === '.' ? pickExportTarget(exportsField) : undefined
+  if (subpath in exportsField) return pickExportTarget(exportsField[subpath])
+  for (const key of keys) {
+    const star = key.indexOf('*')
+    if (star === -1) continue
+    const prefix = key.slice(0, star)
+    const suffix = key.slice(star + 1)
+    if (!subpath.startsWith(prefix) || !subpath.endsWith(suffix)) continue
+    const matched = subpath.slice(prefix.length, subpath.length - suffix.length)
+    const target = pickExportTarget(exportsField[key])
+    if (target) return target.replace('*', matched)
+  }
+  return undefined
+}
+
+/**
+ * Resolve one specifier under one root by reading the package manifest.
+ *
+ * Needed because `require.resolve` only honours the `require`/`default`
+ * conditions — `@earendil-works/pi-ai` exports exactly `{ types, import }`, so
+ * every CommonJS-based lookup reports ERR_PACKAGE_PATH_NOT_EXPORTED even though
+ * the package is present. Node's own 2-argument `import.meta.resolve` would
+ * apply the `import` condition but still requires
+ * `--experimental-import-meta-resolve` on Node 22, which the host does not set.
+ */
+function resolveHostSpecifierManually(root, specifier) {
+  const { name, subpath } = splitSpecifier(specifier)
+  // Roots are normally `node_modules` directories, but an override may point at
+  // a project root, so accept both shapes.
+  for (const pkgDir of [join(root, name), join(root, 'node_modules', name)]) {
+    const manifest = join(pkgDir, 'package.json')
+    if (!existsSync(manifest)) continue
+    let pkg
+    try {
+      pkg = JSON.parse(readFileSync(manifest, 'utf8'))
+    } catch {
+      continue
+    }
+    const target = pkg.exports !== undefined
+      ? resolveExportsTarget(pkg.exports, subpath)
+      : (subpath === '.' ? pkg.module ?? pkg.main ?? 'index.js' : undefined)
+    if (typeof target !== 'string' || !target) continue
+    const file = join(pkgDir, target)
+    if (existsSync(file)) return file
+  }
+  return undefined
+}
+
+/**
+ * Resolve a bare specifier against the host roots. The peers are ESM-only, so
+ * this yields the very files the host itself loads — sharing module instances
+ * instead of duplicating them.
+ */
+export function resolveHostSpecifier(specifier, roots = hostModuleRoots()) {
+  for (const root of roots) {
+    try {
+      const resolved = createRequire(join(root, 'noop.js')).resolve(specifier)
+      if (typeof resolved === 'string' && resolved) return resolved
+    } catch {
+      // Export conditions may exclude "require"; fall back to the manifest.
+    }
+    const manual = resolveHostSpecifierManually(root, specifier)
+    if (manual) return manual
+  }
+  return undefined
+}
+
+/**
  * Dynamic import with a hard timeout. Hanging module graphs (pi-ai / peer
  * packages) must not wedge plugin apply / Settings RPC.
  */
@@ -34,18 +168,25 @@ export async function optionalImport(specifier, options = {}) {
   const timeoutMs = typeof options.timeoutMs === 'number' && options.timeoutMs > 0
     ? options.timeoutMs
     : IMPORT_TIMEOUT_MS
-  const importFn = typeof options.importFn === 'function'
-    ? options.importFn
-    : (id => import(id))
-  try {
-    return await withImportTimeout(
-      Promise.resolve(importFn(specifier)),
-      timeoutMs,
-      `Import timed out after ${timeoutMs}ms: ${specifier}`,
-    )
-  } catch {
-    return undefined
+  const injected = typeof options.importFn === 'function' ? options.importFn : undefined
+  const importFn = injected ?? (id => import(id))
+  const candidates = [specifier]
+  if (!injected && !specifier.startsWith('.') && !specifier.startsWith('/') && !specifier.startsWith('file:')) {
+    const resolved = resolveHostSpecifier(specifier, options.hostRoots ?? hostModuleRoots())
+    if (resolved) candidates.push(pathToFileURL(resolved).href)
   }
+  for (const candidate of candidates) {
+    try {
+      return await withImportTimeout(
+        Promise.resolve(importFn(candidate)),
+        timeoutMs,
+        `Import timed out after ${timeoutMs}ms: ${specifier}`,
+      )
+    } catch {
+      // Fall through to the next candidate.
+    }
+  }
+  return undefined
 }
 
 function textOf(content) {
@@ -681,6 +822,12 @@ export async function createGrokBuildAdapter(session, options = {}) {
         fileExists: async () => false,
       }),
     }),
+    // The host's durable attachment store. Without it PiAiAdapter rejects any
+    // request carrying an image ("requires the durable attachment service"),
+    // and with it images are normalized to the configured budget for us.
+    resolveAttachments: typeof options.resolveAttachments === 'function'
+      ? () => options.resolveAttachments()
+      : undefined,
   })
 
   return {

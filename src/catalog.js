@@ -1,4 +1,4 @@
-import { CATALOG_TIMEOUT_MS, FALLBACK_MODEL_IDS, MODELS_V2_URL, PROVIDER_ID, PROXY_BASE_URL } from './constants.js'
+import { CATALOG_TIMEOUT_MS, FALLBACK_MODEL_IDS, IMAGE_INPUT_MODEL_IDS, MODELS_V2_URL, PROVIDER_ID, PROXY_BASE_URL } from './constants.js'
 import { buildProxyHeaders } from './headers.js'
 
 const REASONING_LEVELS = Object.freeze(['low', 'medium', 'high', 'xhigh'])
@@ -80,6 +80,14 @@ export function mergeCatalog(live) {
   return live.map(model => ({ ...model, source: 'live' }))
 }
 
+/**
+ * Whether this model genuinely accepts image input through the proxy. Verified
+ * per model id — see IMAGE_INPUT_MODEL_IDS for the probe results.
+ */
+export function supportsImageInput(id) {
+  return typeof id === 'string' && IMAGE_INPUT_MODEL_IDS.includes(id)
+}
+
 export function toPiModels(models) {
   return models.map(model => {
     const efforts = model.reasoningEfforts ?? ['low', 'medium', 'high', 'xhigh']
@@ -100,7 +108,7 @@ export function toPiModels(models) {
       baseUrl: PROXY_BASE_URL,
       reasoning: model.reasoning !== false,
       thinkingLevelMap,
-      input: ['text'],
+      input: supportsImageInput(model.id) ? ['text', 'image'] : ['text'],
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
       contextWindow: model.contextWindow ?? 500_000,
       maxTokens: model.maxTokens ?? 500_000,

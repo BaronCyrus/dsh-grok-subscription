@@ -49,6 +49,23 @@ export const REQUEST_IMAGE_MAX_BYTES = 1024 * 1024
 
 export const FALLBACK_MODEL_IDS = Object.freeze(['grok-4.7', 'grok-4.6', 'grok-4.5'])
 
+/**
+ * Models proven to accept image input through the subscription proxy.
+ *
+ * Verified by sending a solid red image and asking its colour, with the same
+ * question and no image as a control:
+ *   grok-4.7 / grok-4.7-build-fast / grok-4.6 -> "Red"
+ *   grok-4.5 -> "green", and it called a yellow square a "circle with a black
+ *               outline" — it confabulates instead of seeing the image.
+ * grok-4.5 is therefore deliberately absent: advertising image input for it
+ * would ship confidently wrong answers.
+ */
+export const IMAGE_INPUT_MODEL_IDS = Object.freeze([
+  'grok-4.7',
+  'grok-4.7-build-fast',
+  'grok-4.6',
+])
+
 /** Hard ceiling for optional dynamic imports (pi-ai / schemastery / dsh-llm). */
 export const IMPORT_TIMEOUT_MS = 2_500
 
