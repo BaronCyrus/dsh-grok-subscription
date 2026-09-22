@@ -25,7 +25,7 @@
 
 ## 三步开始
 
-1. **安装插件**：在终端运行下面的命令；指定候选版本时填写完整的 `包名@版本`，例如 `dsh-grok-subscription@1.0.8`。
+1. **安装插件**：在终端运行下面的命令；指定候选版本时填写完整的 `包名@版本`，例如 `dsh-grok-subscription@1.0.9`。
 
    ```sh
    dsh plugin --profile web add BaronCyrus/dsh-grok-subscription
@@ -91,7 +91,7 @@ dsh plugin --profile web add BaronCyrus/dsh-grok-subscription
 也可以按 npm 上的已发布版本安装：
 
 ```sh
-dsh plugin --profile web add dsh-grok-subscription@1.0.8
+dsh plugin --profile web add dsh-grok-subscription@1.0.9
 ```
 
 目标选择、profile 锁、依赖解析和 bundle 激活均由 DSH 负责。
