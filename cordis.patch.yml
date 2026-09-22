@@ -1,0 +1,3 @@
+- insert:
+    - id: grok-subscription
+      name: 'dsh-grok-subscription'
