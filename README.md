@@ -12,7 +12,7 @@
 - 设置页显示脱敏账户、登录状态、模型与最近一次目录错误，并提供 CLI 登录、设备码登录、从 Grok CLI 拉取、退出登录。
 - **实验性用量显示**：登录后从未文档化的 `GET /v1/billing?format=credits` 读取 `config.creditUsagePercent`（兼容顶层）与周期结束时间；失败时显示「不可用」且**绝不编造百分比**。不影响 Chat。
 - Pull / 登录 / 退出 / 目录刷新后通过 `llm/adapters-updated` 通知 Web 客户端刷新 Chat / New Session 模型选择器（emit 延后，避免与 Pull RPC 重入）。
-- 设置页 Pull **零出站网络**：只读本地 auth.json + 写入 credentials（带超时）；目录与用量由后台及客户端 fire-and-forget 的 `catalog/refresh` / `usage/refresh` 更新（不占用全局 busy）；`status` 只读缓存。
+- 设置页 Pull **零出站网络、内存优先**：只读本地 auth.json，同步写入 `memoryAccessToken` 后立即返回；credentials.set / credentialRef 延后（带超时），不堵 Pull RPC；目录与用量由后台及客户端 fire-and-forget 的 `catalog/refresh` / `usage/refresh` 更新（不占用全局 busy）；`status` / `currentToken` 优先内存。
 
 ## 安装
 
@@ -25,7 +25,7 @@ dsh plugin --profile web add BaronCyrus/dsh-grok-subscription
 # 或本地路径
 # dsh plugin --profile web add /absolute/path/to/dsh-grok-subscription
 # 或 npm（发布后）
-# dsh plugin --profile web add dsh-grok-subscription@0.1.8
+# dsh plugin --profile web add dsh-grok-subscription@0.1.9
 ```
 
 然后重启 `dsh web`，打开 **Settings → Grok 订阅**。也可以在设置页点击“CLI 登录”或“设备码登录”；设备码流程会在启动 DSH 的终端中显示提示。登录完成后点击“从 Grok CLI 拉取”可立即同步；Chat 模型列表会随之刷新。
@@ -45,6 +45,10 @@ npm install
 npm test
 npm run build
 ```
+
+## v0.1.9
+
+修复 0.1.8 实机：Pull RPC 本身卡到客户端 45s 超时。根因是零网络 Pull 仍 `await storeToken` → `credentialRefOf()`（动态 import `@deepseek-ai/dsh-credentials`）无超时，import/set 与 DSH credentials 死锁时会拖死整个 Pull。现会话服务持有 `memoryAccessToken`；Pull 成功路径同步写入内存后立即返回，credentials 持久化与 clear 全部 `scheduleDeferred`；`currentToken` / `status` 优先内存。客户端仍保持 0.1.8 的 fire-and-forget 刷新行为。
 
 ## v0.1.8
 
@@ -100,6 +104,10 @@ dsh plugin --profile web add BaronCyrus/dsh-grok-subscription
 ```
 
 Reinstall after upgrades, restart `dsh web`, then open **Settings → Grok Subscription**.
+
+### v0.1.9
+
+Fixes 0.1.8 live hang where the Pull RPC itself hit the client 45s timeout: zero-network Pull still awaited `storeToken` → `credentialRefOf()` (dynamic import of `@deepseek-ai/dsh-credentials`) with no timeout, so a credentials import/set deadlock stalled Pull. Session now keeps `memoryAccessToken`; success Pull writes memory and returns immediately, deferring credential persist/clear; `currentToken` / `status` prefer memory. Keeps 0.1.8 client fire-and-forget refresh behavior.
 
 ### v0.1.8
 

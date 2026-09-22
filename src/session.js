@@ -39,7 +39,7 @@ export function spawnGrokLogin(options = {}) {
   })
 }
 
-async function credentialRefOf() {
+async function defaultCredentialRefOf() {
   try {
     const mod = await import('@deepseek-ai/dsh-credentials')
     if (typeof mod.credentialRef === 'function') return mod.credentialRef(CREDENTIAL_REF_NAME)
@@ -57,9 +57,11 @@ function scheduleDeferred(run) {
 function withTimeout(promise, ms, message) {
   let timer
   return Promise.race([
-    Promise.resolve(promise),
+    promise,
     new Promise((_, reject) => {
       timer = setTimeout(() => reject(new Error(message)), ms)
+      // Deferred credential I/O must not pin the event loop if the host is idle.
+      if (typeof timer?.unref === 'function') timer.unref()
     }),
   ]).finally(() => {
     if (timer) clearTimeout(timer)
@@ -74,10 +76,21 @@ export function createSessionService({
   loadCatalog: loadCatalogFn = defaultLoadCatalog,
   readAuth = readGrokAuthSession,
   storeTokenTimeoutMs = STORE_TOKEN_TIMEOUT_MS,
+  credentialRefOf = defaultCredentialRefOf,
 } = {}) {
   let catalog = { models: [], source: 'signed-out', error: undefined }
   let lastPublic = publicSessionView(undefined)
   let lastUsage = unavailableUsage('Not fetched yet')
+  /** In-process access token so Pull/adapters never wait on credentials I/O. */
+  let memoryAccessToken
+  /** After an in-process Pull/logout touched session memory, skip hanging credentials.resolve. */
+  let memorySessionTouched = false
+
+  const resolveTimeoutMs = () => {
+    return typeof storeTokenTimeoutMs === 'number' && storeTokenTimeoutMs > 0
+      ? storeTokenTimeoutMs
+      : STORE_TOKEN_TIMEOUT_MS
+  }
 
   const notifyCatalogChange = () => {
     // Fail-soft and deferred so llm/adapters-updated listeners cannot re-enter
@@ -95,35 +108,42 @@ export function createSessionService({
   }
 
   const readStoredToken = async () => {
+    if (typeof memoryAccessToken === 'string' && memoryAccessToken.length > 0) {
+      return memoryAccessToken
+    }
+    // Signed-out pull / logout already cleared memory: do not block adapters on
+    // credentialRef/resolve (cold start still falls through when untouched).
+    if (memorySessionTouched) return undefined
     if (!credentials?.resolve) return undefined
     const hit = await credentials.resolve(await credentialRefOf())
     const value = hit?.value
     return typeof value === 'string' && value.length > 0 ? value : undefined
   }
 
-  const storeToken = async token => {
+  const persistToken = async token => {
     if (!credentials?.set) throw new Error('DSH credentials service is unavailable')
-    const ref = await credentialRefOf()
-    const timeoutMs = typeof storeTokenTimeoutMs === 'number' && storeTokenTimeoutMs > 0
-      ? storeTokenTimeoutMs
-      : STORE_TOKEN_TIMEOUT_MS
-    try {
-      await withTimeout(
-        credentials.set(ref, token),
-        timeoutMs,
-        `Storing Grok credential timed out after ${timeoutMs}ms`,
-      )
-    } catch (error) {
-      if (error instanceof Error && /timed out after/i.test(error.message)) throw error
-      throw error instanceof Error
-        ? error
-        : new Error('Failed to store Grok credential')
-    }
+    const timeoutMs = resolveTimeoutMs()
+    await withTimeout(
+      (async () => {
+        const ref = await credentialRefOf()
+        await credentials.set(ref, token)
+      })(),
+      timeoutMs,
+      `Storing Grok credential timed out after ${timeoutMs}ms`,
+    )
   }
 
   const clearToken = async () => {
     if (!credentials?.unset) return
-    await credentials.unset(await credentialRefOf())
+    const timeoutMs = resolveTimeoutMs()
+    await withTimeout(
+      (async () => {
+        const ref = await credentialRefOf()
+        await credentials.unset(ref)
+      })(),
+      timeoutMs,
+      `Clearing Grok credential timed out after ${timeoutMs}ms`,
+    )
   }
 
   const refreshUsage = async () => {
@@ -177,20 +197,39 @@ export function createSessionService({
   const pull = async () => {
     const parsed = readAuth()
     if (!parsed.session) {
+      memoryAccessToken = undefined
+      memorySessionTouched = true
       catalog = { models: [], source: 'signed-out', error: undefined }
       lastPublic = publicSessionView(undefined)
       lastUsage = unavailableUsage('Not signed in')
-      await clearToken()
+      scheduleDeferred(() => {
+        void clearToken().catch(error => {
+          logger?.warn?.(
+            'Grok subscription deferred credential clear failed: %s',
+            error instanceof Error ? error.message : 'unknown',
+          )
+        })
+      })
       const message = parsed.reason === 'api-key-only'
         ? 'Found an API-key entry only. Sign in with SuperGrok / X Premium via grok login.'
         : 'No Grok Build subscription session in auth.json. Run grok login first.'
       notifyCatalogChange()
       return { ok: false, error: message, account: lastPublic, catalog, usage: lastUsage }
     }
-    // Critical path: local auth.json + credential store only. No outbound network.
-    // Catalog/usage are refreshed in background (and by client catalog/refresh + usage/refresh).
-    await storeToken(parsed.session.accessToken)
+    // Critical path: local auth.json + in-memory token only. Credentials persist
+    // and catalog/usage network work are deferred / backgrounded.
+    const accessToken = parsed.session.accessToken
+    memoryAccessToken = accessToken
+    memorySessionTouched = true
     lastPublic = publicSessionView(parsed.session)
+    scheduleDeferred(() => {
+      void persistToken(accessToken).catch(error => {
+        logger?.warn?.(
+          'Grok subscription deferred credential persist failed: %s',
+          error instanceof Error ? error.message : 'unknown',
+        )
+      })
+    })
     notifyCatalogChange()
     kickBackgroundCatalogRefresh()
     kickBackgroundUsageRefresh()
@@ -198,6 +237,12 @@ export function createSessionService({
   }
 
   const status = async () => {
+    // Prefer memory / last successful Pull so a slow credentials.resolve cannot
+    // force a signed-out flash after an in-process signed-in session.
+    if ((typeof memoryAccessToken === 'string' && memoryAccessToken.length > 0) || lastPublic.signedIn === true) {
+      return { account: lastPublic, catalog, usage: lastUsage, cliAvailable: grokCliAvailable(), authPath: authJsonPath() }
+    }
+
     let token
     try {
       token = await readStoredToken()
@@ -231,7 +276,14 @@ export function createSessionService({
   }
 
   const logout = async () => {
-    await clearToken()
+    memoryAccessToken = undefined
+    memorySessionTouched = true
+    await clearToken().catch(error => {
+      logger?.warn?.(
+        'Grok subscription credential clear failed: %s',
+        error instanceof Error ? error.message : 'unknown',
+      )
+    })
     catalog = { models: [], source: 'signed-out', error: undefined }
     lastPublic = publicSessionView(undefined)
     lastUsage = unavailableUsage('Not signed in')

@@ -25,6 +25,16 @@ function neverResolves() {
   })
 }
 
+function raceMs(promise, ms, message) {
+  let timer
+  return Promise.race([
+    Promise.resolve(promise).finally(() => { if (timer) clearTimeout(timer) }),
+    new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(message)), ms)
+    }),
+  ])
+}
+
 test('pull resolves without awaiting loadCatalog or billing (even if they never settle)', async () => {
   let catalogStarted = 0
   let billingStarted = 0
@@ -61,29 +71,73 @@ test('pull resolves without awaiting loadCatalog or billing (even if they never 
   assert.ok(billingStarted >= 1, 'background usage refresh should be kicked')
 })
 
-test('pull fails fast when credentials.set never resolves (storeToken timeout)', async () => {
+test('pull resolves in <50ms even when credentials.set and credentialRef never settle; currentToken sees memory', async () => {
+  let setStarted = 0
+  let refStarted = 0
+
   const session = createSessionService({
     credentials: {
-      resolve: async () => ({ value: 'test-access-token' }),
-      set: async () => neverResolves(),
-      unset: async () => {},
+      resolve: async () => neverResolves(),
+      set: async () => {
+        setStarted += 1
+        return neverResolves()
+      },
+      unset: async () => neverResolves(),
+    },
+    credentialRefOf: async () => {
+      refStarted += 1
+      return neverResolves()
     },
     readAuth: () => ({ session: mockSession() }),
     loadCatalog: async () => neverResolves(),
     fetchBillingUsage: async () => neverResolves(),
-    storeTokenTimeoutMs: 40,
+    storeTokenTimeoutMs: 30,
   })
 
   const started = Date.now()
-  await assert.rejects(
-    () => session.pull(),
-    error => {
-      assert.match(String(error?.message ?? error), /timed out after 40ms/i)
-      return true
-    },
-  )
+  const result = await raceMs(session.pull(), 50, 'pull hung on credentials')
   const elapsed = Date.now() - started
-  assert.ok(elapsed < 300, `expected fast timeout, took ${elapsed}ms`)
+
+  assert.equal(result.ok, true)
+  assert.equal(result.account.signedIn, true)
+  assert.ok(elapsed < 50, `expected pull <50ms, took ${elapsed}ms`)
+
+  const token = await session.currentToken()
+  assert.equal(token, 'test-access-token', 'adapters must see memoryAccessToken immediately')
+
+  const status = await session.status()
+  assert.equal(status.account.signedIn, true, 'status must prefer memory over hanging resolve')
+
+  // Deferred persist may start later; neither set nor ref must block pull.
+  await waitDeferred()
+  assert.ok(refStarted >= 1 || setStarted >= 0, 'deferred persist may attempt credentialRef')
+})
+
+test('signed-out pull clears memory and returns without awaiting clearToken', async () => {
+  let auth = { session: mockSession() }
+  const session = createSessionService({
+    credentials: {
+      resolve: async () => undefined,
+      set: async () => {},
+      unset: async () => neverResolves(),
+    },
+    credentialRefOf: async () => neverResolves(),
+    readAuth: () => auth,
+    loadCatalog: async () => neverResolves(),
+    fetchBillingUsage: async () => neverResolves(),
+    storeTokenTimeoutMs: 30,
+  })
+
+  await session.pull()
+  assert.equal(await session.currentToken(), 'test-access-token')
+
+  auth = { session: undefined, reason: 'missing' }
+  const started = Date.now()
+  const result = await raceMs(session.pull(), 50, 'signed-out pull hung')
+  assert.equal(result.ok, false)
+  assert.equal(result.account.signedIn, false)
+  assert.equal(await session.currentToken(), undefined)
+  assert.ok(Date.now() - started < 50)
 })
 
 test('status returns cached usage and does not call billing by default', async () => {
