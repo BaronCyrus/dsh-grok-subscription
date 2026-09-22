@@ -25,7 +25,7 @@ Models, reasoning effort, and weekly quota all stay inside DSH.
 
 ## Three-step start
 
-1. **Install the plugin.** Run the command below; to select a candidate version, enter the full `package@version`, for example `dsh-grok-subscription@1.0.1`.
+1. **Install the plugin.** Run the command below; to select a candidate version, enter the full `package@version`, for example `dsh-grok-subscription@1.0.2`.
 
    ```sh
    dsh plugin --profile web add BaronCyrus/dsh-grok-subscription
@@ -89,7 +89,7 @@ dsh plugin --profile web add BaronCyrus/dsh-grok-subscription
 You can also install the version published on npm:
 
 ```sh
-dsh plugin --profile web add dsh-grok-subscription@1.0.1
+dsh plugin --profile web add dsh-grok-subscription@1.0.2
 ```
 
 DSH handles target selection, the profile lock, dependency resolution, and bundle activation.
