@@ -2,8 +2,15 @@ import { useEffect, useRef, useState } from 'react'
 import { en, zh } from './locales.js'
 import { CHANNEL, createRpcClient, unwrap } from './rpc-contract.js'
 import { LOCALE_NS, USAGE_PAGE_URL } from './constants.js'
+import {
+  COMPOSER_QUOTA_STYLE,
+  GrokComposerQuota,
+  notifyQuickQuota,
+} from './client-composer-quota.jsx'
 
-export const inject = ['slots', 'locale', 'connection', 'settingsScope']
+export const inject = [
+  'slots', 'locale', 'connection', 'settingsScope', 'modelDirectories', 'sessions', 'remote',
+]
 
 /** Client-side safety net so Settings never sticks on Working… forever. */
 const RPC_CALL_TIMEOUT_MS = 12_000
@@ -129,6 +136,7 @@ export function GrokSubscriptionSection({ rpc, t }) {
         void callRpc(rpc, 'usage/refresh', {})
           .then(partial => {
             applyPartial(partial)
+            notifyQuickQuota()
           })
           .catch(() => {
             // Fail soft: leave cached / Not fetched yet.
@@ -152,6 +160,7 @@ export function GrokSubscriptionSection({ rpc, t }) {
     void callRpc(rpc, 'usage/refresh', {})
       .then(partial => {
         applyPartial(partial)
+        notifyQuickQuota()
       })
       .catch(() => {
         // Soft: leave cached usage / Not fetched yet.
@@ -187,6 +196,9 @@ export function GrokSubscriptionSection({ rpc, t }) {
           'usage/refresh': 'usageRefreshOk',
         }[endpoint]
         if (successKey) setNotice(t(successKey))
+        if (endpoint === 'usage/refresh' && value?.ok !== false && !value?.error) {
+          notifyQuickQuota()
+        }
       }
     } catch (item) {
       setNotice('')
@@ -300,6 +312,15 @@ export function apply(ctx) {
     return pickCopy(ctx.locale)[key] ?? key
   }
 
+  ctx.effect?.(() => {
+    if (typeof document === 'undefined') return undefined
+    const tag = document.createElement('style')
+    tag.dataset.plugin = 'dsh-grok-subscription'
+    tag.textContent = COMPOSER_QUOTA_STYLE
+    document.head.append(tag)
+    return () => tag.remove()
+  }, 'grok-subscription: composer-quota-style')
+
   ctx.slots.inject('settings.section', () => ctx.slots.register({
     name: 'settings.section',
     id: 'grok-subscription',
@@ -308,6 +329,42 @@ export function apply(ctx) {
     locale: LOCALE_NS,
     inject: () => ({ rpc, t }),
   }, GrokSubscriptionSection))
+
+  const installDirectorySlots = scope => {
+    let modelDirectories
+    try {
+      modelDirectories = typeof scope.get === 'function' ? scope.get('modelDirectories') : undefined
+    } catch {
+      modelDirectories = undefined
+    }
+    if (!modelDirectories?.directoryFor) {
+      try {
+        ctx.logger?.warn?.('Grok composer quota skipped: modelDirectories unavailable')
+      } catch {
+        // ignore
+      }
+      return
+    }
+    scope.slots.inject('conversation.input.right', () => scope.slots.register({
+      name: 'conversation.input.right',
+      id: 'grok-subscription-quota',
+      order: 16,
+      locale: LOCALE_NS,
+      inject: sessionId => ({
+        rpc,
+        t,
+        directory: modelDirectories.directoryFor(sessionId).store,
+      }),
+    }, GrokComposerQuota))
+  }
+
+  try {
+    const remoteSession = typeof ctx.get === 'function' ? ctx.get('remote.session') : undefined
+    if (remoteSession === undefined) installDirectorySlots(ctx)
+    else ctx.inject(['remote.session'], installDirectorySlots)
+  } catch {
+    installDirectorySlots(ctx)
+  }
 }
 
 export { pickCopy, callRpc, RPC_CALL_TIMEOUT_MS }

@@ -25,7 +25,7 @@ dsh plugin --profile web add BaronCyrus/dsh-grok-subscription
 # 或本地路径
 # dsh plugin --profile web add /absolute/path/to/dsh-grok-subscription
 # 或 npm（发布后）
-# dsh plugin --profile web add dsh-grok-subscription@0.1.12
+# dsh plugin --profile web add dsh-grok-subscription@0.1.13
 ```
 
 然后重启 `dsh web`，打开 **Settings → Grok 订阅**。也可以在设置页点击“CLI 登录”或“设备码登录”；设备码流程会在启动 DSH 的终端中显示提示。登录完成后点击“从 Grok CLI 拉取”可立即同步；Chat 模型列表会随之刷新。
@@ -45,6 +45,10 @@ npm install
 npm test
 npm run build
 ```
+
+## v0.1.13
+
+Chat 输入区模型选择旁增加 Codex 风格的每周剩余额度徽章（如 `16%`）；悬停/点击显示「每周额度 剩余 N% · 重置于 M/D HH:mm」。仅在当前会话 provider 为 `grok-build` 且用量 `ok` 时显示。Settings 中 Pull/登录成功后会派发刷新事件更新徽章。本地 0.1.13 供复测，**未发 npm**。升级后请用新 token URL 硬刷新。
 
 ## v0.1.12
 
@@ -115,7 +119,11 @@ dsh plugin --profile web add BaronCyrus/dsh-grok-subscription
 
 Reinstall after upgrades, restart `dsh web`, then open **Settings → Grok Subscription**.
 
-### v0.1.12
+### v0.1.13
+
+Chat 输入区模型选择旁增加 Codex 风格的每周剩余额度徽章（如 `16%`）；悬停/点击显示「每周额度 剩余 N% · 重置于 M/D HH:mm」。仅在当前会话 provider 为 `grok-build` 且用量 `ok` 时显示。Settings 中 Pull/登录成功后会派发刷新事件更新徽章。本地 0.1.13 供复测，**未发 npm**。升级后请用新 token URL 硬刷新。
+
+## v0.1.12
 
 After upgrading, open the fresh token URL from `dsh web` and hard-refresh (Ctrl+Shift+R) so the old immutable `/plugins` client is not reused.
 

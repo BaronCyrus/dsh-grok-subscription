@@ -1,7 +1,7 @@
 export const zh = {
   nav: 'Grok 订阅',
   title: 'Grok 订阅',
-  subtitle: '用 SuperGrok / X Premium（Grok Build）会话，而不是 XAI_API_KEY。',
+  subtitle: '用 SuperGrok / X Premium（Grok Build）会话，而不是 XAI_API_KEY。· 0.1.13',
   signedIn: '已登录',
   signedOut: '未登录',
   account: '账户',
@@ -40,12 +40,16 @@ export const zh = {
   usageFetchedAt: '最近刷新',
   usageRefreshOk: '用量已刷新',
   catalogRefreshOk: '模型目录已刷新',
+  composerQuotaDetails: '每周额度',
+  composerQuotaRemaining: '每周额度 剩余 {remaining}%',
+  composerQuotaResets: '重置于 {reset}',
+  composerQuotaResetUnknown: '重置时间未知',
 }
 
 export const en = {
   nav: 'Grok Subscription',
   title: 'Grok Subscription',
-  subtitle: 'Use a SuperGrok / X Premium (Grok Build) session, not XAI_API_KEY.',
+  subtitle: 'Use a SuperGrok / X Premium (Grok Build) session, not XAI_API_KEY. · 0.1.13',
   signedIn: 'Signed in',
   signedOut: 'Signed out',
   account: 'Account',
@@ -84,6 +88,10 @@ export const en = {
   usageFetchedAt: 'Last refreshed',
   usageRefreshOk: 'Usage refreshed',
   catalogRefreshOk: 'Model catalog refreshed',
+  composerQuotaDetails: 'Weekly quota',
+  composerQuotaRemaining: 'Weekly quota · {remaining}% left',
+  composerQuotaResets: 'Resets {reset}',
+  composerQuotaResetUnknown: 'Reset time unknown',
 }
 
 export const messages = { zh, en }
