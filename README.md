@@ -14,7 +14,7 @@
 [![MIT](https://img.shields.io/badge/license-MIT-111111.svg)](LICENSE)
 [![Star](https://img.shields.io/github/stars/BaronCyrus/dsh-grok-subscription?style=flat&logo=github&label=Star)](https://github.com/BaronCyrus/dsh-grok-subscription/stargazers)
 
-[三步开始](#三步开始) · [安装](#安装) · [更新与卸载](#更新与卸载) · [版本记录](#版本记录)
+[三步开始](#三步开始) · [安装](#安装) · [更新与卸载](#更新与卸载)
 
 </div>
 
@@ -213,52 +213,5 @@ npm run build
 ```
 
 `lib/` 是提交进仓库的构建产物，改动 `src/` 后请运行 `npm run build`。
-
-## 版本记录
-
-<details>
-<summary>展开历史版本</summary>
-
-### v1.0.1
-
-修复 grok-build 路由「发第二条消息没有回复」：`/v1/responses` 只在 `response.output_item.added` 与 `function_call_arguments.done` 上给函数名，参数增量事件不带 `name`，于是工具调用块带着 `name: undefined` 发给宿主。DSH 会拒绝任何无法无损 JSON 序列化的流片段，并以「Assistant stream chunk must be losslessly JSON-serializable」结束整轮，界面上完全没有回复——走 grok-build 的工具调用轮次都会这样，纯文本回复则正常。现：按 call id 记住工具名；采用 `arguments.done` / `response.completed` 的权威参数；从终止快照恢复只出现在 `completed` 里的调用；用量合计保持有限值、错误状态仅在其为数字时附带；出口再统一剔除 `undefined` / 非有限值兜底。附 8 个基于真实抓包帧的回归测试。
-
-### v1.0.0
-
-首个稳定版。内置模型选择器现可通过 `model.reasoning`（efforts + defaultEffort）展示 Grok Build 的 reasoning effort 子菜单（low/medium/high/xhigh），与 Codex 一致。修复 duck `listModels`/`resolveModel` 此前省略该元数据的问题。
-
-### v0.1.13
-
-Chat 输入区模型选择旁增加 Codex 风格的每周剩余额度徽章（如 `16%`）；悬停/点击显示「每周额度 剩余 N% · 重置于 M/D HH:mm」。仅在当前会话 provider 为 `grok-build` 且用量 `ok` 时显示。Settings 中 Pull/登录成功后会派发刷新事件更新徽章。升级后请用新 token URL 硬刷新。
-
-### v0.1.12
-
-修复 0.1.11 实机：Settings → Plugins 仍卡在「Reading plugins…」，Pull 等到客户端 45s 超时。根因是 `status` / `currentToken` 仍可能无超时地 `await credentials.resolve` 与裸 `import('@deepseek-ai/dsh-credentials')`，楔住连接桥后 Plugins 清单也跟着挂。现：`credentialRefOf` 用 timed `optionalImport`；resolve 硬超时（默认 1.5s）；`status` 先内存 / auth.json，再可选 credentials；宿主 RPC 每端点 8s 硬超时；`llm/adapters-updated` 一律延后；`inject` 保持 `['llm','web']`；客户端缺 connection 软跳过，RPC 客户端超时降至 12s。
-
-### v0.1.10
-
-修复 0.1.9 实机卡住：Pull 仍可能撞上客户端 45s 超时，**Settings → Plugins** 卡在 `Reading plugins…`（宿主 Settings/RPC 通道被楔住）。根因：`apply`/`boot` 无超时地 `await` 动态 `import`（`pi-ai` / `dsh-llm-pi-ai` / schemastery），且 `inject` 列了粘性的 `credentials`。现：`inject` 为 `['llm','web']`；`apply` 同步注册 duck adapter 后立即返回；schemastery / `session.pull` / pi-ai 升级通过 `setImmediate` 延后；每个动态 import 都有硬超时（默认 2.5s）并回退到 duck。
-
-### v0.1.9
-
-修复 0.1.8 实机卡住：零网络 Pull 仍会 `await` `storeToken` → `credentialRefOf()`（动态 import `@deepseek-ai/dsh-credentials`）且无超时。现 session 保留 `memoryAccessToken`；成功的 Pull 写入内存后立即返回，凭据持久化/清除延后；`currentToken` / `status` 优先读内存。
-
-### v0.1.8
-
-Pull 不再等到客户端 45s 超时才结束：计费查询有硬超时，Pull 忙碌状态立即解除，避免 Settings 一直转圈。
-
-### v0.1.6
-
-修复多轮对话中助手文本在 block-end 后消失的问题。
-
-### v0.1.3
-
-修复多轮对话中助手文本消失（block-end 覆盖）的问题；对齐常量与 RPC 契约。
-
-### v0.1.2
-
-首个可运行版本：Grok Build 订阅路由、Settings 登录/拉取与用量面板。
-
-</details>
 
 [MIT](LICENSE)

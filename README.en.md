@@ -14,7 +14,7 @@ Models, reasoning effort, and weekly quota all stay inside DSH.
 [![MIT](https://img.shields.io/badge/license-MIT-111111.svg)](LICENSE)
 [![Star](https://img.shields.io/github/stars/BaronCyrus/dsh-grok-subscription?style=flat&logo=github&label=Star)](https://github.com/BaronCyrus/dsh-grok-subscription/stargazers)
 
-[Three-step start](#three-step-start) · [Install](#install) · [Update and uninstall](#update-and-uninstall) · [Version history](#version-history)
+[Three-step start](#three-step-start) · [Install](#install) · [Update and uninstall](#update-and-uninstall)
 
 </div>
 
@@ -213,52 +213,5 @@ npm run build
 ```
 
 `lib/` is a committed build artifact, so run `npm run build` after changing `src/`.
-
-## Version history
-
-<details>
-<summary>Expand past releases</summary>
-
-### v1.0.1
-
-Fixes "no reply after sending a second message" on the grok-build route: `/v1/responses` sends the function name only on `response.output_item.added` and `function_call_arguments.done`, never on the arguments delta, so tool-call chunks carried `name: undefined`. DSH rejects any stream chunk that is not losslessly JSON-serializable and ends the whole turn with "Assistant stream chunk must be losslessly JSON-serializable", leaving no reply in the UI; every tool-calling turn over grok-build failed this way while text-only replies looked fine. Now tool names are remembered by call id, arguments are adopted from `arguments.done` / `response.completed`, calls that appear only in the terminal snapshot are recovered, usage totals stay finite, an error status is attached only when numeric, and outgoing chunks are pruned of `undefined` / non-finite values. Adds 8 regression tests built from real captured frames.
-
-### v1.0.0
-
-First stable release. The stock model picker now shows Grok Build reasoning effort (low/medium/high/xhigh) via `model.reasoning` metadata (`efforts` + `defaultEffort`), matching Codex. Fixes duck `listModels`/`resolveModel` omitting that shape.
-
-### v0.1.13
-
-Adds a Codex-style weekly remaining quota badge (such as `16%`) beside the model picker in the chat composer; hover or click for "Weekly quota · N% left · resets M/D HH:mm". Shown only when the current session's provider is `grok-build` and usage is `ok`. A successful pull or login in Settings dispatches a refresh event that updates the badge. Hard-refresh after upgrading.
-
-### v0.1.12
-
-Fixes the 0.1.11 live hang where Settings → Plugins stayed on "Reading plugins…" and Pull waited out the 45s client timeout. Root cause: `status` / `currentToken` could still `await credentials.resolve` and import `@deepseek-ai/dsh-credentials` without a timeout, wedging the connection bridge and taking the plugin list down with it. Now `credentialRefOf` uses a timed `optionalImport`, resolve has a hard timeout (1.5s default), `status` checks memory / auth.json before optional credentials, host RPC has an 8s per-endpoint timeout, `llm/adapters-updated` is always deferred, `inject` stays `['llm','web']`, the client soft-skips a missing connection, and the RPC client timeout drops to 12s.
-
-### v0.1.10
-
-Fixes the 0.1.9 live hang: Pull could still hit the 45s client timeout, and **Settings → Plugins** stuck on `Reading plugins…` (host Settings/RPC channel wedged). Root cause: `apply`/`boot` awaited untimed dynamic `import`s (`pi-ai` / `dsh-llm-pi-ai` / schemastery), and `inject` listed sticky `credentials`. Now `inject` is `['llm','web']`; `apply` synchronously registers a duck adapter and returns; schemastery / `session.pull` / the pi-ai upgrade are deferred via `setImmediate`; every dynamic import has a hard timeout (2.5s default) and falls back to duck.
-
-### v0.1.9
-
-Fixes the 0.1.8 live hang: zero-network Pull still awaited `storeToken` → `credentialRefOf()` (a dynamic import of `@deepseek-ai/dsh-credentials`) with no timeout. The session now keeps `memoryAccessToken`; a successful Pull writes memory and returns immediately, deferring credential persist/clear, and `currentToken` / `status` prefer memory.
-
-### v0.1.8
-
-Pull no longer runs until the 45s client timeout: the billing request has a hard timeout and the Pull busy state clears immediately instead of leaving Settings spinning.
-
-### v0.1.6
-
-Fixes assistant text vanishing after block-end in multi-turn conversations.
-
-### v0.1.3
-
-Fixes assistant text vanishing in multi-turn conversations (block-end overwrite); aligns constants and the RPC contract.
-
-### v0.1.2
-
-First working release: Grok Build subscription route, Settings login/pull, and the usage panel.
-
-</details>
 
 [MIT](LICENSE)
