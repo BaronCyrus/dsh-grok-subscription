@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { Component, useEffect, useRef, useState } from 'react'
 import { en, zh } from './locales.js'
 import { CHANNEL, createRpcClient, unwrap } from './rpc-contract.js'
 import { LOCALE_NS, USAGE_PAGE_URL } from './constants.js'
@@ -52,6 +52,48 @@ async function callRpc(rpc, endpoint, payload = {}) {
   }
 }
 
+/**
+ * Keeps one bad render from blanking the whole Settings panel. A crash inside
+ * the section previously surfaced to the user as an entirely black panel, which
+ * says nothing about what went wrong.
+ */
+class SectionBoundary extends Component {
+  constructor(props) {
+    super(props)
+    this.state = { error: undefined }
+  }
+
+  static getDerivedStateFromError(error) {
+    return { error }
+  }
+
+  render() {
+    const { error } = this.state
+    if (!error) return this.props.children
+    const t = this.props.t
+    return (
+      <section className="grokSubscription">
+        <style>{SETTINGS_STYLE}</style>
+        <div className="gsHead"><h2>{t('title')}</h2></div>
+        <div className="gsCard">
+          <p className="gsStatus gsStatus--error">
+            {t('renderError')}: {error instanceof Error ? error.message : String(error)}
+          </p>
+        </div>
+      </section>
+    )
+  }
+}
+
+/** Slot component: same panel, but a render failure degrades to a readable card. */
+export function GrokSubscriptionPanel(props) {
+  return (
+    <SectionBoundary t={props.t}>
+      <GrokSubscriptionSection {...props} />
+    </SectionBoundary>
+  )
+}
+
 function Chevron() {
   return (
     <svg className="gsChevron" width="12" height="12" viewBox="0 0 16 16" aria-hidden="true">
@@ -66,15 +108,18 @@ function Chip({ tone = 'off', children }) {
 
 function UsagePanel({ usage, t, usageBusy, onRefresh, signedIn }) {
   const ok = usage?.status === 'ok'
-  const used = ok ? formatPercent(usage.usedPercent) : undefined
-  const remaining = ok ? formatPercent(usage.remainingPercent) : undefined
+  const usedNumber = ok && Number.isFinite(usage.usedPercent) ? usage.usedPercent : undefined
+  const remainingNumber = ok && Number.isFinite(usage.remainingPercent) ? usage.remainingPercent : undefined
+  const used = usedNumber !== undefined ? formatPercent(usedNumber) : undefined
+  const remaining = remainingNumber !== undefined ? formatPercent(remainingNumber) : undefined
   const resetLabel = usage?.periodEndLocal || usage?.periodEnd
   // Show what is left when the backend reports it, otherwise fall back to used.
-  const gaugeValue = remaining ?? (used !== undefined ? formatPercent(100 - Number(used)) : undefined)
-  const gaugeLabel = remaining !== undefined ? t('usageRemaining') : t('usageUsed')
-  const fill = typeof gaugeValue === 'number' && Number.isFinite(gaugeValue)
-    ? Math.min(100, Math.max(0, gaugeValue))
-    : 0
+  // Keep the numeric value for the bar width; `gaugeValue` is the display string.
+  const gaugeNumber = remainingNumber ?? (usedNumber !== undefined ? 100 - usedNumber : undefined)
+  const gaugeValue = gaugeNumber !== undefined ? formatPercent(gaugeNumber) : undefined
+  const gaugeLabel = remainingNumber !== undefined ? t('usageRemaining') : t('usageUsed')
+  const fill = gaugeNumber === undefined ? 0 : Math.min(100, Math.max(0, gaugeNumber))
+  const products = Array.isArray(usage?.productUsage) ? usage.productUsage : []
 
   return (
     <div className="gsCard">
@@ -102,9 +147,9 @@ function UsagePanel({ usage, t, usageBusy, onRefresh, signedIn }) {
           {usage?.reason ? `: ${usage.reason}` : ''}
         </p>
       )}
-      {Array.isArray(usage.productUsage) && usage.productUsage.length > 0 ? (
+      {products.length > 0 ? (
         <div className="gsRows">
-          {usage.productUsage.map((row, index) => (
+          {products.map((row, index) => (
             <div className="gsRow" key={`${row.name ?? 'row'}-${index}`}>
               <span>{row.name ?? '—'}</span>
               <span className="gsRowValue">
@@ -114,7 +159,7 @@ function UsagePanel({ usage, t, usageBusy, onRefresh, signedIn }) {
           ))}
         </div>
       ) : null}
-      {usage.fetchedAt ? <p className="gsHint">{t('usageFetchedAt')}: {usage.fetchedAt}</p> : null}
+      {usage?.fetchedAt ? <p className="gsHint">{t('usageFetchedAt')}: {usage.fetchedAt}</p> : null}
       {usageBusy ? <p className="gsStatus gsStatus--busy">{t('busyUsage')}</p> : null}
       <p className="gsHint">{t('usageSubtitle')}</p>
       <div className="gsActions">
@@ -369,7 +414,7 @@ export function apply(ctx) {
     label: () => t('nav'),
     locale: LOCALE_NS,
     inject: () => ({ rpc, t }),
-  }, GrokSubscriptionSection))
+  }, GrokSubscriptionPanel))
 
   const installDirectorySlots = scope => {
     let modelDirectories
@@ -408,4 +453,4 @@ export function apply(ctx) {
   }
 }
 
-export { pickCopy, callRpc, RPC_CALL_TIMEOUT_MS }
+export { pickCopy, callRpc, RPC_CALL_TIMEOUT_MS, SectionBoundary, UsagePanel }

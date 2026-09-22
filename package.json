@@ -1,6 +1,6 @@
 {
   "name": "dsh-grok-subscription",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Use a SuperGrok or X Premium Grok Build subscription in DeepSeek Harness",
   "type": "module",
   "main": "./lib/index.js",
@@ -39,6 +39,7 @@
   },
   "scripts": {
     "build": "node scripts/build.mjs",
+    "pretest": "npm run build",
     "test": "node --test tests/*.test.mjs",
     "check": "npm test && npm run build"
   },
@@ -55,8 +56,12 @@
     "node": "^22.19.0 || >=24.0.0"
   },
   "peerDependencies": {
+    "@deepseek-ai/dsh-api-remotes": "^0.1.5-rc.2",
     "@deepseek-ai/dsh-client-connection": "^0.1.5-rc.2",
     "@deepseek-ai/dsh-client-locale": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-client-ui-conversation": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-client-ui-model-selection": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-client-ui-primitives": "^0.1.5-rc.2",
     "@deepseek-ai/dsh-client-ui-settings": "^0.1.5-rc.2",
     "@deepseek-ai/dsh-client-ui-slots": "^0.1.5-rc.2",
     "@deepseek-ai/dsh-credentials": "^0.1.5-rc.2",
@@ -66,11 +71,7 @@
     "@deepseek-ai/dsh-web": "^0.1.5-rc.2",
     "@earendil-works/pi-ai": "^0.82.1",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "@deepseek-ai/dsh-api-remotes": "^0.1.5-rc.2",
-    "@deepseek-ai/dsh-client-ui-conversation": "^0.1.5-rc.2",
-    "@deepseek-ai/dsh-client-ui-model-selection": "^0.1.5-rc.2",
-    "@deepseek-ai/dsh-client-ui-primitives": "^0.1.5-rc.2"
+    "react-dom": "^18.2.0"
   },
   "peerDependenciesMeta": {
     "@deepseek-ai/dsh-client-connection": {
@@ -123,7 +124,9 @@
     }
   },
   "devDependencies": {
-    "esbuild": "^0.25.0"
+    "esbuild": "^0.25.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
   },
   "author": "BaronCyrus",
   "repository": {

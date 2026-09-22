@@ -1,7 +1,7 @@
 export const zh = {
   nav: 'Grok 订阅',
   title: 'Grok 订阅',
-  subtitle: '用 SuperGrok / X Premium（Grok Build）会话，而不是 XAI_API_KEY。· 1.0.3',
+  subtitle: '用 SuperGrok / X Premium（Grok Build）会话，而不是 XAI_API_KEY。· 1.0.4',
   signedIn: '已登录',
   signedOut: '未登录',
   account: '账户',
@@ -21,6 +21,7 @@ export const zh = {
   pullHint: '安全读取 ~/.grok/auth.json（拒绝符号链接与组/其他人可读），只把短期 access token 写入 DSH。',
   loginHelp: '登录方式说明',
   refreshCatalog: '刷新模型目录',
+  renderError: '界面渲染失败',
   busy: '处理中…',
   busyCatalog: '正在刷新模型目录…',
   busyUsage: '正在刷新用量…',
@@ -51,7 +52,7 @@ export const zh = {
 export const en = {
   nav: 'Grok Subscription',
   title: 'Grok Subscription',
-  subtitle: 'Use a SuperGrok / X Premium (Grok Build) session, not XAI_API_KEY. · 1.0.3',
+  subtitle: 'Use a SuperGrok / X Premium (Grok Build) session, not XAI_API_KEY. · 1.0.4',
   signedIn: 'Signed in',
   signedOut: 'Signed out',
   account: 'Account',
@@ -71,6 +72,7 @@ export const en = {
   pullHint: 'Reads ~/.grok/auth.json securely (refuses symlinks and group/other-readable files) and stores only the short-lived access token in DSH.',
   loginHelp: 'How signing in works',
   refreshCatalog: 'Refresh model catalog',
+  renderError: 'Failed to render this panel',
   busy: 'Working…',
   busyCatalog: 'Refreshing model catalog…',
   busyUsage: 'Refreshing usage…',
