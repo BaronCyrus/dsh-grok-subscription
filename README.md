@@ -25,7 +25,7 @@ dsh plugin --profile web add BaronCyrus/dsh-grok-subscription
 # 或本地路径
 # dsh plugin --profile web add /absolute/path/to/dsh-grok-subscription
 # 或 npm（发布后）
-# dsh plugin --profile web add dsh-grok-subscription@1.0.0
+# dsh plugin --profile web add dsh-grok-subscription@1.0.1
 ```
 
 然后重启 `dsh web`，打开 **Settings → Grok 订阅**。也可以在设置页点击“CLI 登录”或“设备码登录”；设备码流程会在启动 DSH 的终端中显示提示。登录完成后点击“从 Grok CLI 拉取”可立即同步；Chat 模型列表会随之刷新。
@@ -46,19 +46,23 @@ npm test
 npm run build
 ```
 
+## v1.0.1
+
+修复 grok-build 路由「发第二条消息没有回复」：`/v1/responses` 只在 `response.output_item.added` 与 `function_call_arguments.done` 上给函数名，参数增量事件不带 `name`，于是工具调用块带着 `name: undefined` 发给宿主。DSH 会拒绝任何无法无损 JSON 序列化的流片段，并以「Assistant stream chunk must be losslessly JSON-serializable」结束整轮，界面上完全没有回复——走 grok-build 的工具调用轮次都会这样，纯文本回复则正常。现：按 call id 记住工具名；采用 `arguments.done` / `response.completed` 的权威参数；从终止快照恢复只出现在 `completed` 里的调用；用量合计保持有限值、错误状态仅在其为数字时附带；出口再统一剔除 `undefined` / 非有限值兜底。附 8 个基于真实抓包帧的回归测试。
+
 ## v1.0.0
 
 首个稳定版，已发布 npm：`dsh-grok-subscription@1.0.0`。内置模型选择器现可通过 `model.reasoning`（efforts + defaultEffort）展示 Grok Build 的 reasoning effort 子菜单（low/medium/high/xhigh），与 Codex 一致。修复 duck `listModels`/`resolveModel` 此前省略该元数据的问题。
 
 ## v0.1.13
 
-Chat 输入区模型选择旁增加 Codex 风格的每周剩余额度徽章（如 `16%`）；悬停/点击显示「每周额度 剩余 N% · 重置于 M/D HH:mm」。仅在当前会话 provider 为 `grok-build` 且用量 `ok` 时显示。Settings 中 Pull/登录成功后会派发刷新事件更新徽章。本地 0.1.13 供复测，**未发 npm**。升级后请用新 token URL 硬刷新。
+Chat 输入区模型选择旁增加 Codex 风格的每周剩余额度徽章（如 `16%`）；悬停/点击显示「每周额度 剩余 N% · 重置于 M/D HH:mm」。仅在当前会话 provider 为 `grok-build` 且用量 `ok` 时显示。Settings 中 Pull/登录成功后会派发刷新事件更新徽章。已发布 npm：`dsh-grok-subscription@0.1.13`。升级后请用新 token URL 硬刷新。
 
 ## v0.1.12
 
 升级后请用 `dsh web` 新打印的带 token URL 打开，并硬刷新（Ctrl+Shift+R），避免旧 `/plugins` client 缓存。
 
-修复 0.1.11 实机：Settings → Plugins 仍卡在「Reading plugins…」，Pull 等到客户端 45s 超时。根因是 `status` / `currentToken` 仍可能无超时地 `await credentials.resolve` 与裸 `import('@deepseek-ai/dsh-credentials')`，楔住连接桥后 Plugins 清单也跟着挂。现：`credentialRefOf` 用 timed `optionalImport`；resolve 硬超时（默认 1.5s）；`status` 先内存 / auth.json，再可选 credentials；宿主 RPC 每端点 8s 硬超时；`llm/adapters-updated` 一律延后；`inject` 保持 `['llm','web']`；客户端缺 connection 软跳过，RPC 客户端超时降至 12s。本地 0.1.12 供复测，未发 npm。
+修复 0.1.11 实机：Settings → Plugins 仍卡在「Reading plugins…」，Pull 等到客户端 45s 超时。根因是 `status` / `currentToken` 仍可能无超时地 `await credentials.resolve` 与裸 `import('@deepseek-ai/dsh-credentials')`，楔住连接桥后 Plugins 清单也跟着挂。现：`credentialRefOf` 用 timed `optionalImport`；resolve 硬超时（默认 1.5s）；`status` 先内存 / auth.json，再可选 credentials；宿主 RPC 每端点 8s 硬超时；`llm/adapters-updated` 一律延后；`inject` 保持 `['llm','web']`；客户端缺 connection 软跳过，RPC 客户端超时降至 12s。已发布 npm：`dsh-grok-subscription@0.1.12`。
 
 ## v0.1.10
 
@@ -123,19 +127,23 @@ dsh plugin --profile web add BaronCyrus/dsh-grok-subscription
 
 Reinstall after upgrades, restart `dsh web`, then open **Settings → Grok Subscription**.
 
+### v1.0.1
+
+Fixes "no reply after sending a second message" on the grok-build route: `/v1/responses` sends the function name only on `response.output_item.added` and `function_call_arguments.done`, never on the arguments delta, so tool-call chunks carried `name: undefined`. DSH rejects any stream chunk that is not losslessly JSON-serializable and ends the whole turn with "Assistant stream chunk must be losslessly JSON-serializable", leaving no reply in the UI; every tool-calling turn over grok-build failed this way while text-only replies looked fine. Now tool names are remembered by call id, arguments are adopted from `arguments.done` / `response.completed`, calls that appear only in the terminal snapshot are recovered, usage totals stay finite, an error status is attached only when numeric, and outgoing chunks are pruned of `undefined` / non-finite values. Adds 8 regression tests built from real captured frames.
+
 ### v1.0.0
 
 First stable release, published to npm as `dsh-grok-subscription@1.0.0`. Stock model picker now shows Grok Build reasoning effort (low/medium/high/xhigh) via `model.reasoning` metadata (`efforts` + `defaultEffort`), matching Codex. Fixes duck `listModels`/`resolveModel` omitting that shape.
 
 ### v0.1.13
 
-Chat 输入区模型选择旁增加 Codex 风格的每周剩余额度徽章（如 `16%`）；悬停/点击显示「每周额度 剩余 N% · 重置于 M/D HH:mm」。仅在当前会话 provider 为 `grok-build` 且用量 `ok` 时显示。Settings 中 Pull/登录成功后会派发刷新事件更新徽章。本地 0.1.13 供复测，**未发 npm**。升级后请用新 token URL 硬刷新。
+Chat 输入区模型选择旁增加 Codex 风格的每周剩余额度徽章（如 `16%`）；悬停/点击显示「每周额度 剩余 N% · 重置于 M/D HH:mm」。仅在当前会话 provider 为 `grok-build` 且用量 `ok` 时显示。Settings 中 Pull/登录成功后会派发刷新事件更新徽章。已发布 npm：`dsh-grok-subscription@0.1.13`。升级后请用新 token URL 硬刷新。
 
 ## v0.1.12
 
 After upgrading, open the fresh token URL from `dsh web` and hard-refresh (Ctrl+Shift+R) so the old immutable `/plugins` client is not reused.
 
-修复 0.1.11 实机：Settings → Plugins 仍卡在「Reading plugins…」，Pull 等到客户端 45s 超时。根因是 `status` / `currentToken` 仍可能无超时地 `await credentials.resolve` 与裸 `import('@deepseek-ai/dsh-credentials')`，楔住连接桥后 Plugins 清单也跟着挂。现：`credentialRefOf` 用 timed `optionalImport`；resolve 硬超时（默认 1.5s）；`status` 先内存 / auth.json，再可选 credentials；宿主 RPC 每端点 8s 硬超时；`llm/adapters-updated` 一律延后；`inject` 保持 `['llm','web']`；客户端缺 connection 软跳过，RPC 客户端超时降至 12s。本地 0.1.12 供复测，未发 npm。
+修复 0.1.11 实机：Settings → Plugins 仍卡在「Reading plugins…」，Pull 等到客户端 45s 超时。根因是 `status` / `currentToken` 仍可能无超时地 `await credentials.resolve` 与裸 `import('@deepseek-ai/dsh-credentials')`，楔住连接桥后 Plugins 清单也跟着挂。现：`credentialRefOf` 用 timed `optionalImport`；resolve 硬超时（默认 1.5s）；`status` 先内存 / auth.json，再可选 credentials；宿主 RPC 每端点 8s 硬超时；`llm/adapters-updated` 一律延后；`inject` 保持 `['llm','web']`；客户端缺 connection 软跳过，RPC 客户端超时降至 12s。已发布 npm：`dsh-grok-subscription@0.1.12`。
 
 ## v0.1.10
 
