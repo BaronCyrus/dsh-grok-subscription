@@ -25,7 +25,7 @@
 
 ## 三步开始
 
-1. **安装插件**：在终端运行下面的命令；指定候选版本时填写完整的 `包名@版本`，例如 `dsh-grok-subscription@1.0.2`。
+1. **安装插件**：在终端运行下面的命令；指定候选版本时填写完整的 `包名@版本`，例如 `dsh-grok-subscription@1.0.3`。
 
    ```sh
    dsh plugin --profile web add BaronCyrus/dsh-grok-subscription
@@ -57,13 +57,13 @@
   <img src="docs/assets/settings-account.webp" width="820" alt="DSH 设置中的 Grok 订阅页面：登录状态、账号、登录按钮与凭据说明">
 </p>
 
-上图为 **设置 → Grok 订阅** 主界面：显示登录状态与脱敏账号，提供 CLI 登录、设备码登录、从 Grok CLI 拉取和登出，并说明凭据的读取方式。截图中的账号与时间均为演示数据。
+上图为 **设置 → Grok 订阅** 主界面：顶部状态胶囊显示登录状态，账户卡片提供 CLI 登录、设备码登录、从 Grok CLI 拉取和登出，凭据读取方式收在可展开的「登录方式说明」里。样式沿用 DSH 自身的设计变量，因此跟随主题明暗切换。截图中的账号与时间均为演示数据。
 
 <p align="center">
   <img src="docs/assets/settings-usage.webp" width="820" alt="Grok 订阅设置页中的实验性用量面板：已用 6%、剩余约 94%">
 </p>
 
-实验性用量面板来自未公开的订阅计费接口（`/v1/billing?format=credits`）。它仅供参考：接口可能随时变化或消失，读取失败时不会显示编造的百分比，也不影响聊天。
+实验性用量面板来自未公开的订阅计费接口（`/v1/billing?format=credits`）：剩余比例以进度条呈现，产品明细逐行列出。它仅供参考：接口可能随时变化或消失，读取失败时不会显示编造的百分比，也不影响聊天。
 
 ## 准备 DSH
 
@@ -89,7 +89,7 @@ dsh plugin --profile web add BaronCyrus/dsh-grok-subscription
 也可以按 npm 上的已发布版本安装：
 
 ```sh
-dsh plugin --profile web add dsh-grok-subscription@1.0.2
+dsh plugin --profile web add dsh-grok-subscription@1.0.3
 ```
 
 目标选择、profile 锁、依赖解析和 bundle 激活均由 DSH 负责。

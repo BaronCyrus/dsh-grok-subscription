@@ -25,7 +25,7 @@ Models, reasoning effort, and weekly quota all stay inside DSH.
 
 ## Three-step start
 
-1. **Install the plugin.** Run the command below; to select a candidate version, enter the full `package@version`, for example `dsh-grok-subscription@1.0.2`.
+1. **Install the plugin.** Run the command below; to select a candidate version, enter the full `package@version`, for example `dsh-grok-subscription@1.0.3`.
 
    ```sh
    dsh plugin --profile web add BaronCyrus/dsh-grok-subscription
@@ -57,13 +57,13 @@ These capabilities reuse the same local Grok Build sign-in.
   <img src="docs/assets/settings-account.webp" width="820" alt="The Grok Subscription page in DSH Settings: sign-in status, account, login buttons and credential notes">
 </p>
 
-The **Settings → Grok Subscription** screen shows sign-in status and a masked account, offers CLI login, device-code login, pull from the Grok CLI, and logout, and explains how credentials are read. Account and time values in the screenshot are demo data.
+The **Settings → Grok Subscription** screen uses a status chip for the sign-in state, and an account card offering CLI login, device-code login, pull from the Grok CLI, and logout; how credentials are read lives in a collapsible "How signing in works" disclosure. It is styled with DSH's own design tokens, so it follows the light and dark theme. Account and time values in the screenshot are demo data.
 
 <p align="center">
   <img src="docs/assets/settings-usage.webp" width="820" alt="The experimental usage panel in Grok Subscription settings: 6% used, about 94% remaining">
 </p>
 
-The experimental usage panel comes from an undocumented subscription billing endpoint (`/v1/billing?format=credits`). It is informational: the endpoint may change or disappear, a failed read never shows an invented percentage, and chat is unaffected.
+The experimental usage panel comes from an undocumented subscription billing endpoint (`/v1/billing?format=credits`): the remaining share is drawn as a progress bar and per-product rows are listed separately. It is informational: the endpoint may change or disappear, a failed read never shows an invented percentage, and chat is unaffected.
 
 ## Prepare DSH
 
@@ -89,7 +89,7 @@ dsh plugin --profile web add BaronCyrus/dsh-grok-subscription
 You can also install the version published on npm:
 
 ```sh
-dsh plugin --profile web add dsh-grok-subscription@1.0.2
+dsh plugin --profile web add dsh-grok-subscription@1.0.3
 ```
 
 DSH handles target selection, the profile lock, dependency resolution, and bundle activation.

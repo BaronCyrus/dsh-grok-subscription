@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { en, zh } from './locales.js'
 import { CHANNEL, createRpcClient, unwrap } from './rpc-contract.js'
 import { LOCALE_NS, USAGE_PAGE_URL } from './constants.js'
+import { SETTINGS_STYLE } from './client-settings-style.js'
 import {
   COMPOSER_QUOTA_STYLE,
   GrokComposerQuota,
@@ -51,55 +52,76 @@ async function callRpc(rpc, endpoint, payload = {}) {
   }
 }
 
+function Chevron() {
+  return (
+    <svg className="gsChevron" width="12" height="12" viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+function Chip({ tone = 'off', children }) {
+  return <span className={`gsChip gsChip--${tone}`}><span className="gsDot" />{children}</span>
+}
+
 function UsagePanel({ usage, t, usageBusy, onRefresh, signedIn }) {
   const ok = usage?.status === 'ok'
   const used = ok ? formatPercent(usage.usedPercent) : undefined
   const remaining = ok ? formatPercent(usage.remainingPercent) : undefined
   const resetLabel = usage?.periodEndLocal || usage?.periodEnd
+  // Show what is left when the backend reports it, otherwise fall back to used.
+  const gaugeValue = remaining ?? (used !== undefined ? formatPercent(100 - Number(used)) : undefined)
+  const gaugeLabel = remaining !== undefined ? t('usageRemaining') : t('usageUsed')
+  const fill = typeof gaugeValue === 'number' && Number.isFinite(gaugeValue)
+    ? Math.min(100, Math.max(0, gaugeValue))
+    : 0
 
   return (
-    <div className="usageBlock">
-      <strong>{t('usageTitle')}</strong>
-      <p className="muted">{t('usageSubtitle')}</p>
-      {ok && used !== undefined ? (
-        <>
-          <p>
-            {t('usageUsed')}: <strong>{used}%</strong>
-            {remaining !== undefined ? <> · {t('usageRemaining')} {remaining}%</> : null}
-          </p>
-          {resetLabel ? (
-            <p className="muted">
-              {t('usageReset')}: {resetLabel}
-              {usage.periodEnd && usage.periodEndLocal ? <> (<code>{usage.periodEnd}</code>)</> : null}
-            </p>
-          ) : null}
-          {Array.isArray(usage.productUsage) && usage.productUsage.length > 0 ? (
-            <div>
-              <p className="muted">{t('usageProduct')}</p>
-              <ul>
-                {usage.productUsage.map((row, index) => (
-                  <li key={`${row.name ?? 'row'}-${index}`}>
-                    {row.name ?? '—'}
-                    {typeof row.usedPercent === 'number' ? ` · ${formatPercent(row.usedPercent)}%` : ''}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
-          {usage.fetchedAt ? <p className="muted">{t('usageFetchedAt')}: {usage.fetchedAt}</p> : null}
-        </>
+    <div className="gsCard">
+      <div className="gsCardHead">
+        <h3>{t('usageTitle')}</h3>
+      </div>
+      {ok && (used !== undefined || remaining !== undefined) ? (
+        <div className="gsGauge">
+          <div className="gsGaugeTop">
+            {gaugeValue !== undefined ? <span className="gsGaugeValue">{gaugeValue}%</span> : null}
+            <span className="gsGaugeLabel">{gaugeLabel}</span>
+          </div>
+          <div className="gsBar" role="img" aria-label={`${gaugeLabel} ${gaugeValue ?? 0}%`}>
+            <span style={{ width: `${fill}%` }} />
+          </div>
+          <div className="gsGaugeMeta">
+            <span>{t('usageUsed')} {used ?? '—'}%</span>
+            {resetLabel ? <span>{t('usageReset')} {resetLabel}</span> : null}
+            {usage.periodEnd && usage.periodEndLocal ? <code>{usage.periodEnd}</code> : null}
+          </div>
+        </div>
       ) : (
-        <p>
+        <p className="gsEmpty">
           {t('usageUnavailable')}
           {usage?.reason ? `: ${usage.reason}` : ''}
         </p>
       )}
-      {usageBusy ? <p className="muted">{t('busyUsage')}</p> : null}
-      <div className="row">
-        <button type="button" disabled={Boolean(usageBusy) || !signedIn} onClick={onRefresh}>
+      {Array.isArray(usage.productUsage) && usage.productUsage.length > 0 ? (
+        <div className="gsRows">
+          {usage.productUsage.map((row, index) => (
+            <div className="gsRow" key={`${row.name ?? 'row'}-${index}`}>
+              <span>{row.name ?? '—'}</span>
+              <span className="gsRowValue">
+                {typeof row.usedPercent === 'number' ? `${formatPercent(row.usedPercent)}%` : '—'}
+              </span>
+            </div>
+          ))}
+        </div>
+      ) : null}
+      {usage.fetchedAt ? <p className="gsHint">{t('usageFetchedAt')}: {usage.fetchedAt}</p> : null}
+      {usageBusy ? <p className="gsStatus gsStatus--busy">{t('busyUsage')}</p> : null}
+      <p className="gsHint">{t('usageSubtitle')}</p>
+      <div className="gsActions">
+        <button className="gsBtn" type="button" disabled={Boolean(usageBusy) || !signedIn} onClick={onRefresh}>
           {t('usageRefresh')}
         </button>
-        <a href={USAGE_PAGE_URL} target="_blank" rel="noreferrer">{t('usageOpenGrok')}</a>
+        <a className="gsLink" href={USAGE_PAGE_URL} target="_blank" rel="noreferrer">{t('usageOpenGrok')}</a>
       </div>
     </div>
   )
@@ -194,6 +216,7 @@ export function GrokSubscriptionSection({ rpc, t }) {
           'login/device': 'loginOk',
           logout: 'logoutOk',
           'usage/refresh': 'usageRefreshOk',
+          'catalog/refresh': 'catalogRefreshOk',
         }[endpoint]
         if (successKey) setNotice(t(successKey))
         if (endpoint === 'usage/refresh' && value?.ok !== false && !value?.error) {
@@ -225,40 +248,38 @@ export function GrokSubscriptionSection({ rpc, t }) {
 
   return (
     <section className="grokSubscription">
-      <style>{`
-        .grokSubscription { display: grid; gap: 12px; max-width: 42rem; }
-        .grokSubscription h2 { margin: 0 0 4px; font-size: 1.15rem; }
-        .grokSubscription p, .grokSubscription li { line-height: 1.5; }
-        .grokSubscription .muted { opacity: 0.78; font-size: 0.92rem; }
-        .grokSubscription .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-        .grokSubscription button { cursor: pointer; }
-        .grokSubscription .error { color: #b42318; }
-        .grokSubscription .notice { color: #067647; }
-        .grokSubscription ul { margin: 0; padding-left: 1.2rem; }
-        .grokSubscription .usageBlock { display: grid; gap: 8px; padding: 10px 0; border-top: 1px solid color-mix(in srgb, currentColor 18%, transparent); }
-        .grokSubscription a { color: inherit; }
-      `}</style>
-      <div>
+      <style>{SETTINGS_STYLE}</style>
+      <div className="gsHead">
         <h2>{t('title')}</h2>
-        <p className="muted">{t('subtitle')}</p>
+        <Chip tone={signedIn ? 'ok' : 'off'}>{signedIn ? t('signedIn') : t('signedOut')}</Chip>
       </div>
-      <div>
-        <strong>{t('account')}: </strong>
-        {signedIn ? `${t('signedIn')} · ${account.maskedAccount ?? t('unknownAccount')}` : t('signedOut')}
+      <p className="gsLead">{t('subtitle')}</p>
+
+      <div className="gsCard">
+        <div className="gsCardHead">
+          <h3>{t('account')}</h3>
+          {signedIn && account?.maskedAccount ? <span className="gsAccount">{account.maskedAccount}</span> : null}
+        </div>
+        <div className="gsActions">
+          <button className="gsBtn gsBtn--primary" type="button" disabled={Boolean(busy)} onClick={() => void run('login/cli')}>{t('loginCli')}</button>
+          <button className="gsBtn" type="button" disabled={Boolean(busy)} onClick={() => void run('login/device')}>{t('loginDevice')}</button>
+          <button className="gsBtn" type="button" disabled={Boolean(busy)} onClick={() => void run('pull')}>{t('pull')}</button>
+          <button className="gsBtn gsBtn--danger" type="button" disabled={Boolean(busy) || !signedIn} onClick={() => void run('logout')}>{t('logout')}</button>
+        </div>
+        {busy ? <p className="gsStatus gsStatus--busy">{t('busy')}</p> : null}
+        {notice ? <p className="gsStatus gsStatus--ok">{notice}</p> : null}
+        {error ? <p className="gsStatus gsStatus--error">{t('error')}: {error}</p> : null}
+        {status?.cliAvailable === false ? <p className="gsStatus gsStatus--warn">{t('cliMissing')}</p> : null}
+        <details className="gsDisclosure">
+          <summary><Chevron />{t('loginHelp')}</summary>
+          <div className="gsDisclosureBody">
+            <p>{t('loginHint')}</p>
+            <p>{t('deviceHint')}</p>
+            <p>{t('pullHint')}</p>
+          </div>
+        </details>
       </div>
-      <div className="row">
-        <button type="button" disabled={Boolean(busy)} onClick={() => void run('login/cli')}>{t('loginCli')}</button>
-        <button type="button" disabled={Boolean(busy)} onClick={() => void run('login/device')}>{t('loginDevice')}</button>
-        <button type="button" disabled={Boolean(busy)} onClick={() => void run('pull')}>{t('pull')}</button>
-        <button type="button" disabled={Boolean(busy) || !signedIn} onClick={() => void run('logout')}>{t('logout')}</button>
-      </div>
-      {busy ? <p className="muted">{t('busy')}</p> : null}
-      {notice ? <p className="notice">{notice}</p> : null}
-      {error ? <p className="error">{t('error')}: {error}</p> : null}
-      <p className="muted">{t('loginHint')}</p>
-      <p className="muted">{t('deviceHint')}</p>
-      <p className="muted">{t('pullHint')}</p>
-      {status?.cliAvailable === false ? <p className="muted">{t('cliMissing')}</p> : null}
+
       <UsagePanel
         usage={status?.usage}
         t={t}
@@ -266,15 +287,35 @@ export function GrokSubscriptionSection({ rpc, t }) {
         signedIn={signedIn}
         onRefresh={() => void run('usage/refresh')}
       />
-      <div>
-        <strong>{t('models')}</strong>
-        <p className="muted">{sourceLabel(catalog?.source, t)}</p>
-        {models.length === 0 ? <p>{t('noModels')}</p> : (
-          <ul>{models.map(model => <li key={model.id}>{model.name} <code>{model.id}</code></li>)}</ul>
+
+      <div className="gsCard">
+        <div className="gsCardHead">
+          <h3>{t('models')}</h3>
+          <span className="gsSpacer" />
+          <Chip tone={catalog?.source === 'live' ? 'ok' : catalog?.source === 'fallback' ? 'warn' : 'off'}>
+            {sourceLabel(catalog?.source, t)}
+          </Chip>
+        </div>
+        {models.length === 0 ? (
+          <p className="gsEmpty">{t('noModels')}</p>
+        ) : (
+          <div className="gsModels">
+            {models.map(model => (
+              <span className="gsModel" key={model.id}>
+                {model.name} <code>{model.id}</code>
+              </span>
+            ))}
+          </div>
         )}
-        {catalog?.error ? <p className="error">{t('catalogError')}: {catalog.error}</p> : null}
+        {catalog?.error ? <p className="gsStatus gsStatus--error">{t('catalogError')}: {catalog.error}</p> : null}
+        <div className="gsActions">
+          <button className="gsBtn" type="button" disabled={!signedIn} onClick={() => void run('catalog/refresh')}>
+            {t('refreshCatalog')}
+          </button>
+        </div>
       </div>
-      <p className="muted">{t('caveats')}</p>
+
+      <p className="gsCaveat">{t('caveats')}</p>
     </section>
   )
 }
