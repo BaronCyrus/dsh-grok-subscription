@@ -10,8 +10,8 @@ import {
 
 export const name = CORDIS_ID
 /**
- * Keep inject narrow so a sticky credentials/settings service cannot delay
- * plugin apply (Settings → Plugins "Reading plugins…"). Soft-get the rest.
+ * Keep inject narrow so sticky credentials/settings cannot delay plugin apply
+ * (Settings → Plugins "Reading plugins…"). Soft-get the rest via ctx.get only.
  */
 export const inject = ['llm', 'web']
 
@@ -21,15 +21,14 @@ function scheduleDeferred(run) {
 }
 
 function softService(ctx, key) {
+  // Never touch ctx[key]: Cordis throws "cannot get property X without inject"
+  // when the service is not listed in `inject`.
   try {
-    if (typeof ctx.get === 'function') {
-      const hit = ctx.get(key)
-      if (hit !== undefined && hit !== null) return hit
-    }
+    if (typeof ctx.get === 'function') return ctx.get(key) ?? undefined
   } catch {
     // Cordis get may throw when the service is absent; soft-fail.
   }
-  return ctx[key]
+  return undefined
 }
 
 export function apply(ctx, options = {}) {
@@ -44,13 +43,17 @@ export function apply(ctx, options = {}) {
   }
 
   const notifyCatalogChange = () => {
-    if (!active) return
-    try {
-      ctx.emit('llm/adapters-updated')
-    } catch (error) {
-      ctx.logger?.warn?.('an llm/adapters-updated listener failed')
-      ctx.logger?.warn?.(error)
-    }
+    // Always defer: sync emit during apply/plugin load can re-enter listeners
+    // while the loader is still spinning (Settings → Plugins "Reading…").
+    scheduleDeferred(() => {
+      if (!active) return
+      try {
+        ctx.emit('llm/adapters-updated')
+      } catch (error) {
+        ctx.logger?.warn?.('an llm/adapters-updated listener failed')
+        ctx.logger?.warn?.(error)
+      }
+    })
   }
 
   const credentials = softService(ctx, 'credentials')
@@ -68,7 +71,7 @@ export function apply(ctx, options = {}) {
     const created = createSync(session)
     if (created.note) ctx.logger?.debug?.(created.note)
     ctx.llm.registerAdapter([PROVIDER_ID], created.adapter)
-    // Catalog notify after sync duck register so pickers see the provider immediately.
+    // Catalog notify deferred so pickers refresh without re-entering apply.
     notifyCatalogChange()
   } catch (error) {
     ctx.logger?.warn?.(

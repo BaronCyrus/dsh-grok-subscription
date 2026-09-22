@@ -25,7 +25,7 @@ dsh plugin --profile web add BaronCyrus/dsh-grok-subscription
 # 或本地路径
 # dsh plugin --profile web add /absolute/path/to/dsh-grok-subscription
 # 或 npm（发布后）
-# dsh plugin --profile web add dsh-grok-subscription@0.1.10
+# dsh plugin --profile web add dsh-grok-subscription@0.1.12
 ```
 
 然后重启 `dsh web`，打开 **Settings → Grok 订阅**。也可以在设置页点击“CLI 登录”或“设备码登录”；设备码流程会在启动 DSH 的终端中显示提示。登录完成后点击“从 Grok CLI 拉取”可立即同步；Chat 模型列表会随之刷新。
@@ -45,6 +45,12 @@ npm install
 npm test
 npm run build
 ```
+
+## v0.1.12
+
+升级后请用 `dsh web` 新打印的带 token URL 打开，并硬刷新（Ctrl+Shift+R），避免旧 `/plugins` client 缓存。
+
+修复 0.1.11 实机：Settings → Plugins 仍卡在「Reading plugins…」，Pull 等到客户端 45s 超时。根因是 `status` / `currentToken` 仍可能无超时地 `await credentials.resolve` 与裸 `import('@deepseek-ai/dsh-credentials')`，楔住连接桥后 Plugins 清单也跟着挂。现：`credentialRefOf` 用 timed `optionalImport`；resolve 硬超时（默认 1.5s）；`status` 先内存 / auth.json，再可选 credentials；宿主 RPC 每端点 8s 硬超时；`llm/adapters-updated` 一律延后；`inject` 保持 `['llm','web']`；客户端缺 connection 软跳过，RPC 客户端超时降至 12s。本地 0.1.12 供复测，未发 npm。
 
 ## v0.1.10
 
@@ -109,7 +115,13 @@ dsh plugin --profile web add BaronCyrus/dsh-grok-subscription
 
 Reinstall after upgrades, restart `dsh web`, then open **Settings → Grok Subscription**.
 
-### v0.1.10
+### v0.1.12
+
+After upgrading, open the fresh token URL from `dsh web` and hard-refresh (Ctrl+Shift+R) so the old immutable `/plugins` client is not reused.
+
+修复 0.1.11 实机：Settings → Plugins 仍卡在「Reading plugins…」，Pull 等到客户端 45s 超时。根因是 `status` / `currentToken` 仍可能无超时地 `await credentials.resolve` 与裸 `import('@deepseek-ai/dsh-credentials')`，楔住连接桥后 Plugins 清单也跟着挂。现：`credentialRefOf` 用 timed `optionalImport`；resolve 硬超时（默认 1.5s）；`status` 先内存 / auth.json，再可选 credentials；宿主 RPC 每端点 8s 硬超时；`llm/adapters-updated` 一律延后；`inject` 保持 `['llm','web']`；客户端缺 connection 软跳过，RPC 客户端超时降至 12s。本地 0.1.12 供复测，未发 npm。
+
+## v0.1.10
 
 Fixes 0.1.9 live hang: Pull could still hit the 45s client timeout, and **Settings → Plugins** stuck on `Reading plugins…` (host Settings/RPC channel wedged). Root cause: `apply`/`boot` awaited untimed dynamic `import`s (`pi-ai` / `dsh-llm-pi-ai` / schemastery), and `inject` listed sticky `credentials`. Now `inject` is `['llm','web']`; `apply` synchronously registers a duck adapter and returns; schemastery / `session.pull` / pi-ai upgrade are deferred via `setImmediate`; every dynamic import has a hard timeout (default 2.5s) and falls back to duck. Keeps 0.1.9 memory-first Pull and 0.1.8 client fire-and-forget.
 

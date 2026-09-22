@@ -44,3 +44,8 @@ export const FALLBACK_MODEL_IDS = Object.freeze(['grok-4.7', 'grok-4.6', 'grok-4
 
 /** Hard ceiling for optional dynamic imports (pi-ai / schemastery / dsh-llm). */
 export const IMPORT_TIMEOUT_MS = 2_500
+
+/** Short ceiling for credentials.resolve / credentialRef on status & currentToken. */
+export const CREDENTIALS_IO_TIMEOUT_MS = 1_500
+/** Host-side hard timeout for each Grok subscription RPC handler. */
+export const RPC_HANDLER_TIMEOUT_MS = 8_000

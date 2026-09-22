@@ -1,10 +1,15 @@
 import { existsSync } from 'node:fs'
 import { spawn } from 'node:child_process'
 import { join } from 'node:path'
-import { CREDENTIAL_REF_NAME, STORE_TOKEN_TIMEOUT_MS } from './constants.js'
+import {
+  CREDENTIAL_REF_NAME,
+  CREDENTIALS_IO_TIMEOUT_MS,
+  STORE_TOKEN_TIMEOUT_MS,
+} from './constants.js'
 import { authJsonPath, grokHome, publicSessionView, readGrokAuthSession } from './auth-file.js'
 import { loadCatalog as defaultLoadCatalog } from './catalog.js'
 import { fetchBillingUsage as defaultFetchBillingUsage, unavailableUsage } from './usage.js'
+import { optionalImport } from './adapter.js'
 
 export function resolveGrokBin(env = process.env, exists = existsSync) {
   if (typeof env.DSH_GROK_BIN === 'string' && env.DSH_GROK_BIN.trim()) return env.DSH_GROK_BIN.trim()
@@ -41,8 +46,8 @@ export function spawnGrokLogin(options = {}) {
 
 async function defaultCredentialRefOf() {
   try {
-    const mod = await import('@deepseek-ai/dsh-credentials')
-    if (typeof mod.credentialRef === 'function') return mod.credentialRef(CREDENTIAL_REF_NAME)
+    const mod = await optionalImport('@deepseek-ai/dsh-credentials')
+    if (typeof mod?.credentialRef === 'function') return mod.credentialRef(CREDENTIAL_REF_NAME)
   } catch {
     // Host without the credentials package still accepts the raw env-style name.
   }
@@ -54,14 +59,16 @@ function scheduleDeferred(run) {
   else queueMicrotask(run)
 }
 
-function withTimeout(promise, ms, message) {
+export function withTimeout(promise, ms, message, options = {}) {
   let timer
+  const shouldUnref = options.unref !== false
   return Promise.race([
     promise,
     new Promise((_, reject) => {
       timer = setTimeout(() => reject(new Error(message)), ms)
       // Deferred credential I/O must not pin the event loop if the host is idle.
-      if (typeof timer?.unref === 'function') timer.unref()
+      // RPC host timeouts keep the timer ref'd so the request cannot evaporate.
+      if (shouldUnref && typeof timer?.unref === 'function') timer.unref()
     }),
   ]).finally(() => {
     if (timer) clearTimeout(timer)
@@ -76,6 +83,7 @@ export function createSessionService({
   loadCatalog: loadCatalogFn = defaultLoadCatalog,
   readAuth = readGrokAuthSession,
   storeTokenTimeoutMs = STORE_TOKEN_TIMEOUT_MS,
+  credentialsIoTimeoutMs = CREDENTIALS_IO_TIMEOUT_MS,
   credentialRefOf = defaultCredentialRefOf,
 } = {}) {
   let catalog = { models: [], source: 'signed-out', error: undefined }
@@ -90,6 +98,12 @@ export function createSessionService({
     return typeof storeTokenTimeoutMs === 'number' && storeTokenTimeoutMs > 0
       ? storeTokenTimeoutMs
       : STORE_TOKEN_TIMEOUT_MS
+  }
+
+  const resolveIoTimeoutMs = () => {
+    return typeof credentialsIoTimeoutMs === 'number' && credentialsIoTimeoutMs > 0
+      ? credentialsIoTimeoutMs
+      : CREDENTIALS_IO_TIMEOUT_MS
   }
 
   const notifyCatalogChange = () => {
@@ -115,9 +129,25 @@ export function createSessionService({
     // credentialRef/resolve (cold start still falls through when untouched).
     if (memorySessionTouched) return undefined
     if (!credentials?.resolve) return undefined
-    const hit = await credentials.resolve(await credentialRefOf())
-    const value = hit?.value
-    return typeof value === 'string' && value.length > 0 ? value : undefined
+    const timeoutMs = resolveIoTimeoutMs()
+    try {
+      const hit = await withTimeout(
+        (async () => {
+          const ref = await credentialRefOf()
+          return credentials.resolve(ref)
+        })(),
+        timeoutMs,
+        `Resolving Grok credential timed out after ${timeoutMs}ms`,
+      )
+      const value = hit?.value
+      return typeof value === 'string' && value.length > 0 ? value : undefined
+    } catch (error) {
+      logger?.warn?.(
+        'Grok subscription credential resolve failed: %s',
+        error instanceof Error ? error.message : 'unknown',
+      )
+      return undefined
+    }
   }
 
   const persistToken = async token => {
@@ -243,6 +273,22 @@ export function createSessionService({
       return { account: lastPublic, catalog, usage: lastUsage, cliAvailable: grokCliAvailable(), authPath: authJsonPath() }
     }
 
+    // Same spirit as pull: auth.json first (sync), never block Settings on credentials.
+    try {
+      const parsed = readAuth()
+      if (parsed.session) {
+        memoryAccessToken = parsed.session.accessToken
+        memorySessionTouched = true
+        lastPublic = publicSessionView(parsed.session)
+        return { account: lastPublic, catalog, usage: lastUsage, cliAvailable: grokCliAvailable(), authPath: authJsonPath() }
+      }
+    } catch (error) {
+      logger?.warn?.(
+        'Grok subscription auth.json read failed during status: %s',
+        error instanceof Error ? error.message : 'unknown',
+      )
+    }
+
     let token
     try {
       token = await readStoredToken()
@@ -256,15 +302,8 @@ export function createSessionService({
       lastUsage = unavailableUsage('Not signed in')
       return { account: lastPublic, catalog, usage: lastUsage, cliAvailable: grokCliAvailable(), authPath: authJsonPath() }
     }
-    if (lastPublic.signedIn !== true) {
-      try {
-        const parsed = readAuth()
-        if (parsed.session) lastPublic = publicSessionView(parsed.session)
-        else lastPublic = Object.freeze({ signedIn: true, maskedAccount: '••••', authMode: 'oidc', source: 'dsh-credentials' })
-      } catch {
-        lastPublic = Object.freeze({ signedIn: true, maskedAccount: '••••', authMode: 'oidc', source: 'dsh-credentials' })
-      }
-    }
+    memoryAccessToken = token
+    lastPublic = Object.freeze({ signedIn: true, maskedAccount: '••••', authMode: 'oidc', source: 'dsh-credentials' })
     // Return cached usage only. Billing is fetched via usage/refresh (or the
     // background post-pull kick) — never on every Settings status load.
     return { account: lastPublic, catalog, usage: lastUsage, cliAvailable: grokCliAvailable(), authPath: authJsonPath() }

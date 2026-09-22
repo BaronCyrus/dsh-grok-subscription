@@ -1,4 +1,5 @@
 import { RPC_ENDPOINTS } from './rpc-contract.js'
+import { optionalImport } from './adapter.js'
 
 function parseEnvelope(body, method) {
   if (!body || typeof body !== 'object') return undefined
@@ -9,7 +10,33 @@ function parseEnvelope(body, method) {
   }
 }
 
+let cachedClientRequestSchema
+let schemaLoadStarted = false
+
+function kickSchemaLoad() {
+  if (schemaLoadStarted) return
+  schemaLoadStarted = true
+  void optionalImport('@deepseek-ai/dsh-client-connection').then(mod => {
+    if (mod?.clientRequestSchema && typeof mod.clientRequestSchema.safeParse === 'function') {
+      cachedClientRequestSchema = mod.clientRequestSchema
+    }
+  }).catch(() => {
+    // Fall back to parseEnvelope forever.
+  })
+}
+
+function resolveEnvelope(body, method) {
+  const schema = cachedClientRequestSchema
+  if (schema) {
+    const envelope = schema.safeParse(body)
+    if (!envelope.success || envelope.data.method !== method) return undefined
+    return { rpcId: envelope.data.rpcId, payload: envelope.data.payload }
+  }
+  return parseEnvelope(body, method)
+}
+
 export function registerSubscriptionTransport(connection, handler) {
+  kickSchemaLoad()
   const disposers = []
   try {
     for (const endpoint of RPC_ENDPOINTS) {
@@ -31,7 +58,19 @@ export function registerSubscriptionTransport(connection, handler) {
           } catch {
             return new Response('invalid JSON', { status: 400 })
           }
-          const envelope = parseEnvelope(body, method)
+          // Prefer Codex-style clientRequestSchema when the package resolved;
+          // otherwise fall back to lightweight parseEnvelope.
+          if (!cachedClientRequestSchema) {
+            try {
+              const mod = await optionalImport('@deepseek-ai/dsh-client-connection')
+              if (mod?.clientRequestSchema && typeof mod.clientRequestSchema.safeParse === 'function') {
+                cachedClientRequestSchema = mod.clientRequestSchema
+              }
+            } catch {
+              // keep parseEnvelope fallback
+            }
+          }
+          const envelope = resolveEnvelope(body, method)
           if (!envelope) return new Response('invalid RPC envelope', { status: 400 })
           let result
           try {

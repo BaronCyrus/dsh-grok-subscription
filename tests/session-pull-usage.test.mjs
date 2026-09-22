@@ -221,3 +221,60 @@ test('refreshCatalog returns live catalog and can run after a zero-network pull'
   assert.equal(catalog.models[0].id, 'grok-4.7')
   assert.equal(session.catalog().source, 'live')
 })
+
+test('status returns within ~100ms even when credentials.resolve never settles', async () => {
+  const session = createSessionService({
+    credentials: {
+      resolve: async () => neverResolves(),
+      set: async () => neverResolves(),
+      unset: async () => neverResolves(),
+    },
+    credentialRefOf: async () => neverResolves(),
+    readAuth: () => ({ session: undefined, reason: 'missing' }),
+    loadCatalog: async () => neverResolves(),
+    fetchBillingUsage: async () => neverResolves(),
+    credentialsIoTimeoutMs: 40,
+    storeTokenTimeoutMs: 40,
+  })
+
+  const started = Date.now()
+  const status = await raceMs(session.status(), 100, 'status hung on credentials.resolve')
+  const elapsed = Date.now() - started
+
+  assert.equal(status.account.signedIn, false)
+  assert.equal(status.catalog.source, 'signed-out')
+  assert.ok(elapsed < 100, `expected status <100ms, took ${elapsed}ms`)
+})
+
+test('status prefers auth.json over hanging credentials.resolve', async () => {
+  const session = createSessionService({
+    credentials: {
+      resolve: async () => neverResolves(),
+    },
+    credentialRefOf: async () => neverResolves(),
+    readAuth: () => ({ session: mockSession() }),
+    credentialsIoTimeoutMs: 5_000,
+  })
+
+  const started = Date.now()
+  const status = await raceMs(session.status(), 100, 'status hung despite auth.json')
+  assert.equal(status.account.signedIn, true)
+  assert.equal(await session.currentToken(), 'test-access-token')
+  assert.ok(Date.now() - started < 100)
+})
+
+test('currentToken times out when credentials.resolve never settles', async () => {
+  const session = createSessionService({
+    credentials: {
+      resolve: async () => neverResolves(),
+    },
+    credentialRefOf: async () => 'GROK_BUILD_ACCESS_TOKEN',
+    readAuth: () => ({ session: undefined, reason: 'missing' }),
+    credentialsIoTimeoutMs: 40,
+  })
+
+  const started = Date.now()
+  const token = await raceMs(session.currentToken(), 150, 'currentToken hung')
+  assert.equal(token, undefined)
+  assert.ok(Date.now() - started < 150)
+})

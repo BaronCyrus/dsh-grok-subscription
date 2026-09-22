@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { apply } from '../src/index.js'
+import { apply, inject as pluginInject } from '../src/index.js'
 import { PROVIDER_ID } from '../src/constants.js'
 
 function neverResolves() {
@@ -105,4 +105,29 @@ test('apply soft-gets credentials and never requires inject listing', async () =
   })
   assert.ok(seenCredentials, 'session created')
   assert.ok(ctx._adapters.has(PROVIDER_ID))
+})
+
+test('inject stays lean (llm+web only)', () => {
+  assert.deepEqual(pluginInject, ['llm', 'web'])
+})
+
+test('apply defers llm/adapters-updated emit (never sync during apply)', async () => {
+  const ctx = fakeCtx()
+  let emits = 0
+  ctx.emit = () => { emits += 1 }
+
+  apply(ctx, {
+    createSync: () => ({
+      adapter: { listModels: async () => [] },
+      kind: 'custom-mvp',
+    }),
+    skipSettings: true,
+    skipPull: true,
+    skipUpgrade: true,
+    defer: () => {},
+  })
+
+  assert.equal(emits, 0, 'emit must not run synchronously inside apply')
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(emits, 1, 'emit runs on deferred tick')
 })

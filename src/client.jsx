@@ -6,7 +6,7 @@ import { LOCALE_NS, USAGE_PAGE_URL } from './constants.js'
 export const inject = ['slots', 'locale', 'connection', 'settingsScope']
 
 /** Client-side safety net so Settings never sticks on Working… forever. */
-const RPC_CALL_TIMEOUT_MS = 45_000
+const RPC_CALL_TIMEOUT_MS = 12_000
 
 function pickCopy(locale) {
   const language = typeof locale === 'string' ? locale : locale?.language ?? locale?.lang
@@ -270,7 +270,24 @@ export function GrokSubscriptionSection({ rpc, t }) {
 export function apply(ctx) {
   ctx.effect?.(() => ctx.locale?.register?.(LOCALE_NS, { zh, en }), 'grok-subscription: copy')
 
-  const connection = ctx.get?.('connection') ?? ctx.connection
+  // Prefer ctx.get('connection') (listed in inject). Soft-fail if missing so
+  // apply never throws while the connection plugin is still loading.
+  let connection
+  try {
+    connection = typeof ctx.get === 'function' ? ctx.get('connection') : undefined
+  } catch {
+    connection = undefined
+  }
+  if (!connection) connection = ctx.connection
+  if (!connection?.rpc) {
+    try {
+      ctx.logger?.warn?.('Grok subscription Settings section skipped: connection unavailable')
+    } catch {
+      // ignore
+    }
+    return
+  }
+
   const rpc = createRpcClient(connection.rpc)
   const bound = ctx.locale?.bind?.(LOCALE_NS)
   const t = key => {

@@ -1,4 +1,6 @@
+import { RPC_HANDLER_TIMEOUT_MS } from './constants.js'
 import { publicError, publicResult } from './rpc-contract.js'
+import { withTimeout } from './session.js'
 
 function stripSecrets(value) {
   if (!value || typeof value !== 'object') return value
@@ -69,26 +71,38 @@ function sanitizeUsage(usage) {
   return out
 }
 
-export function createRpcHandler(session) {
+async function dispatch(session, endpoint) {
+  if (endpoint === 'status') return publicResult(stripSecrets(await session.status()))
+  if (endpoint === 'pull') return publicResult(stripSecrets(await session.pull()))
+  if (endpoint === 'logout') return publicResult(stripSecrets(await session.logout()))
+  if (endpoint === 'catalog/refresh') {
+    const catalog = await session.refreshCatalog()
+    return publicResult(stripSecrets({ catalog, account: session.publicAccount(), usage: session.usage?.() }))
+  }
+  if (endpoint === 'usage') {
+    return publicResult(stripSecrets({ usage: session.usage?.() ?? { status: 'unavailable', reason: 'Usage unavailable', experimental: true } }))
+  }
+  if (endpoint === 'usage/refresh') {
+    const usage = await session.refreshUsage()
+    return publicResult(stripSecrets({ usage, account: session.publicAccount() }))
+  }
+  if (endpoint === 'login/cli') return publicResult(stripSecrets(await session.login({ device: false })))
+  if (endpoint === 'login/device') return publicResult(stripSecrets(await session.login({ device: true })))
+  return publicError(new Error(`Unknown Grok subscription RPC: ${endpoint}`))
+}
+
+export function createRpcHandler(session, options = {}) {
+  const timeoutMs = typeof options.timeoutMs === 'number' && options.timeoutMs > 0
+    ? options.timeoutMs
+    : RPC_HANDLER_TIMEOUT_MS
   return async function handle(endpoint, _payload, _signal) {
     try {
-      if (endpoint === 'status') return publicResult(stripSecrets(await session.status()))
-      if (endpoint === 'pull') return publicResult(stripSecrets(await session.pull()))
-      if (endpoint === 'logout') return publicResult(stripSecrets(await session.logout()))
-      if (endpoint === 'catalog/refresh') {
-        const catalog = await session.refreshCatalog()
-        return publicResult(stripSecrets({ catalog, account: session.publicAccount(), usage: session.usage?.() }))
-      }
-      if (endpoint === 'usage') {
-        return publicResult(stripSecrets({ usage: session.usage?.() ?? { status: 'unavailable', reason: 'Usage unavailable', experimental: true } }))
-      }
-      if (endpoint === 'usage/refresh') {
-        const usage = await session.refreshUsage()
-        return publicResult(stripSecrets({ usage, account: session.publicAccount() }))
-      }
-      if (endpoint === 'login/cli') return publicResult(stripSecrets(await session.login({ device: false })))
-      if (endpoint === 'login/device') return publicResult(stripSecrets(await session.login({ device: true })))
-      return publicError(new Error(`Unknown Grok subscription RPC: ${endpoint}`))
+      return await withTimeout(
+        dispatch(session, endpoint),
+        timeoutMs,
+        `Grok subscription RPC "${endpoint}" timed out after ${timeoutMs}ms`,
+        { unref: false },
+      )
     } catch (error) {
       return publicError(error)
     }
