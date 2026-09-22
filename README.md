@@ -25,7 +25,7 @@ dsh plugin --profile web add BaronCyrus/dsh-grok-subscription
 # 或本地路径
 # dsh plugin --profile web add /absolute/path/to/dsh-grok-subscription
 # 或 npm（发布后）
-# dsh plugin --profile web add dsh-grok-subscription@0.1.13
+# dsh plugin --profile web add dsh-grok-subscription@1.0.0
 ```
 
 然后重启 `dsh web`，打开 **Settings → Grok 订阅**。也可以在设置页点击“CLI 登录”或“设备码登录”；设备码流程会在启动 DSH 的终端中显示提示。登录完成后点击“从 Grok CLI 拉取”可立即同步；Chat 模型列表会随之刷新。
@@ -45,6 +45,10 @@ npm install
 npm test
 npm run build
 ```
+
+## v1.0.0
+
+首个稳定版，已发布 npm：`dsh-grok-subscription@1.0.0`。内置模型选择器现可通过 `model.reasoning`（efforts + defaultEffort）展示 Grok Build 的 reasoning effort 子菜单（low/medium/high/xhigh），与 Codex 一致。修复 duck `listModels`/`resolveModel` 此前省略该元数据的问题。
 
 ## v0.1.13
 
@@ -118,6 +122,10 @@ dsh plugin --profile web add BaronCyrus/dsh-grok-subscription
 ```
 
 Reinstall after upgrades, restart `dsh web`, then open **Settings → Grok Subscription**.
+
+### v1.0.0
+
+First stable release, published to npm as `dsh-grok-subscription@1.0.0`. Stock model picker now shows Grok Build reasoning effort (low/medium/high/xhigh) via `model.reasoning` metadata (`efforts` + `defaultEffort`), matching Codex. Fixes duck `listModels`/`resolveModel` omitting that shape.
 
 ### v0.1.13
 

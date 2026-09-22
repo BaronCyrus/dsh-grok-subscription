@@ -68,6 +68,7 @@ export function fallbackModels() {
     maxTokens: 500_000,
     reasoning: true,
     reasoningEfforts: id === 'grok-4.5' ? ['low', 'medium', 'high'] : ['low', 'medium', 'high', 'xhigh'],
+    defaultEffort: 'high',
     source: 'fallback',
   }))
 }
@@ -108,13 +109,33 @@ export function toPiModels(models) {
   })
 }
 
+export function reasoningInfoOf(model) {
+  if (model?.reasoning === false) return undefined
+  const efforts = Array.isArray(model?.reasoningEfforts) && model.reasoningEfforts.length
+    ? model.reasoningEfforts
+    : ['low', 'medium', 'high', 'xhigh']
+  const title = id => `${id.charAt(0).toUpperCase()}${id.slice(1)}`
+  const preferred = model?.defaultEffort && efforts.includes(model.defaultEffort)
+    ? model.defaultEffort
+    : (efforts.includes('high') ? 'high' : efforts[efforts.length - 1])
+  return {
+    efforts: efforts.map(id => ({ id, name: title(id) })),
+    defaultEffort: preferred,
+  }
+}
+
 export function toLlmModels(models) {
-  return models.map(model => ({
-    provider: PROVIDER_ID,
-    id: model.id,
-    name: model.name,
-    inputModalities: ['text'],
-  }))
+  return models.map(model => {
+    const info = {
+      provider: PROVIDER_ID,
+      id: model.id,
+      name: model.name,
+      inputModalities: ['text'],
+    }
+    const reasoning = reasoningInfoOf(model)
+    if (reasoning) info.reasoning = reasoning
+    return info
+  })
 }
 
 export async function fetchLiveCatalog(accessToken, options = {}) {

@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { extractLiveModels, extractModelIds, fallbackModels, mergeCatalog } from '../src/catalog.js'
+import { extractLiveModels, extractModelIds, fallbackModels, mergeCatalog, reasoningInfoOf, toLlmModels } from '../src/catalog.js'
 
 test('parses OpenAI-style { data } listings including grok-4.7', () => {
   const models = extractLiveModels({
@@ -33,3 +33,37 @@ test('keeps live models and marks them live when the catalog is non-empty', () =
   assert.equal(merged[0].source, 'live')
   assert.equal(merged[0].id, 'grok-4.7')
 })
+
+test('reasoningInfoOf defaults efforts and prefers high', () => {
+  const info = reasoningInfoOf({ reasoning: true })
+  assert.deepEqual(info.efforts.map(item => item.id), ['low', 'medium', 'high', 'xhigh'])
+  assert.equal(info.defaultEffort, 'high')
+  assert.equal(reasoningInfoOf({ reasoning: false }), undefined)
+  assert.equal(reasoningInfoOf({ reasoningEfforts: ['low', 'medium'], defaultEffort: 'low' }).defaultEffort, 'low')
+})
+
+test('toLlmModels attaches reasoning efforts for fallback and sample models', () => {
+  const fallback = toLlmModels(fallbackModels())
+  assert.ok(fallback.length > 0)
+  for (const model of fallback) {
+    assert.ok(model.reasoning)
+    assert.ok(model.reasoning.efforts.some(item => item.id === 'high'))
+    assert.equal(model.reasoning.defaultEffort, 'high')
+  }
+  const sample = toLlmModels([{
+    id: 'grok-4.7',
+    name: 'Grok 4.7',
+    reasoning: true,
+    reasoningEfforts: ['low', 'medium', 'high', 'xhigh'],
+  }])
+  assert.deepEqual(sample[0].reasoning.efforts.map(item => item.id), ['low', 'medium', 'high', 'xhigh'])
+  assert.equal(sample[0].reasoning.defaultEffort, 'high')
+})
+
+test('fallbackModels sets defaultEffort high', () => {
+  for (const model of fallbackModels()) {
+    assert.equal(model.defaultEffort, 'high')
+    assert.ok(Array.isArray(model.reasoningEfforts) && model.reasoningEfforts.length)
+  }
+})
+

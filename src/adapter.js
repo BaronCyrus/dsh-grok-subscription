@@ -9,7 +9,7 @@ import {
   RESPONSES_URL,
   STREAM_IDLE_TIMEOUT_MS,
 } from './constants.js'
-import { toLlmModels, toPiModels } from './catalog.js'
+import { reasoningInfoOf, toLlmModels, toPiModels } from './catalog.js'
 import { buildProxyHeaders, fingerprintHeaders } from './headers.js'
 
 function withImportTimeout(promise, ms, message) {
@@ -298,13 +298,20 @@ function createDuckAdapter(session) {
     },
     async resolveModel(provider, model) {
       const found = list().find(item => item.id === model)
-      return {
+      const raw = session.publicAccount()?.signedIn === true
+        ? session.models().find(item => item.id === model)
+        : undefined
+      const info = {
         provider,
         id: model,
         name: found?.name ?? model,
         inputModalities: ['text'],
-        context: { contextWindow: 500_000 },
+        context: { contextWindow: raw?.contextWindow ?? 500_000 },
       }
+      const reasoning = reasoningInfoOf(raw)
+      if (reasoning) info.reasoning = reasoning
+      else if (found?.reasoning) info.reasoning = found.reasoning
+      return info
     },
     async prepareCall(provider, model, signal) {
       const resolved = await this.resolveModel(provider, model, signal)
@@ -523,6 +530,7 @@ export async function createGrokBuildAdapter(session, options = {}) {
     requestImageMaxBytes: REQUEST_IMAGE_MAX_BYTES,
     cacheRetention: 'short',
     transport: 'sse',
+    reasoning: 'high',
   })
 
   const LlmError = dshLlm?.LlmError

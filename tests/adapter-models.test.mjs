@@ -51,3 +51,23 @@ test('duck listModels follows session.models and signed-in gate', async () => {
   const signedOut = createDuckAdapter(fakeSession({ signedIn: false, models: [sample] }))
   assert.deepEqual(await signedOut.listModels(PROVIDER_ID), [])
 })
+
+test('duck listModels and resolveModel expose reasoning efforts for signed-in sample', async () => {
+  const session = fakeSession({ signedIn: true, models: [sample] })
+  const duck = createDuckAdapter(session)
+  const listed = await duck.listModels(PROVIDER_ID)
+  assert.equal(listed.length, 1)
+  const effortIds = listed[0].reasoning.efforts.map(item => item.id)
+  assert.deepEqual(effortIds, ['low', 'medium', 'high', 'xhigh'])
+  assert.ok(listed[0].reasoning.defaultEffort)
+
+  const resolved = await duck.resolveModel(PROVIDER_ID, 'grok-4.7')
+  const resolvedIds = resolved.reasoning.efforts.map(item => item.id)
+  assert.ok(resolvedIds.includes('low'))
+  assert.ok(resolvedIds.includes('medium'))
+  assert.ok(resolvedIds.includes('high'))
+  assert.ok(resolvedIds.includes('xhigh'))
+  assert.ok(resolved.reasoning.defaultEffort)
+  assert.equal(resolved.context.contextWindow, 500_000)
+})
+
