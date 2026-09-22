@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { collectImageParts, responsesInput } from '../src/adapter.js'
+import { collectImageParts, createDuckAdapter, responsesInput } from '../src/adapter.js'
 import { toLlmModels } from '../src/catalog.js'
 
 const REF = Object.freeze({
@@ -145,4 +145,48 @@ test('toLlmModels advertises image input only for verified models', () => {
   assert.deepEqual(byId.get('grok-4.6').inputModalities, ['text', 'image'])
   // grok-4.5 confabulates instead of seeing images, so it must stay text-only.
   assert.deepEqual(byId.get('grok-4.5').inputModalities, ['text'])
+})
+
+/**
+ * The host admits a prompt carrying an attachment only after
+ * `llm.resolveModelInfo(provider, model).inputModalities` includes "image":
+ * listModels feeds the picker, resolveModel feeds that gate. Declaring the
+ * modality in one place but not the other rejects every paste — which is
+ * exactly how a fix once shipped that only touched listModels.
+ */
+test('listModels and resolveModel agree on image modality', async () => {
+  const sample = [
+    { id: 'grok-4.7', name: 'Grok 4.7', contextWindow: 500_000, reasoning: true, reasoningEfforts: ['low', 'medium', 'high'], source: 'live' },
+    { id: 'grok-4.7-build-fast', name: 'Grok 4.7 Fast', contextWindow: 500_000, reasoning: true, reasoningEfforts: ['low', 'medium', 'high'], source: 'live' },
+    { id: 'grok-4.6', name: 'Grok 4.6', contextWindow: 500_000, reasoning: true, reasoningEfforts: ['low', 'medium', 'high'], source: 'live' },
+    { id: 'grok-4.5', name: 'Grok 4.5', contextWindow: 500_000, reasoning: true, reasoningEfforts: ['low', 'medium', 'high'], source: 'live' },
+  ]
+  const duck = createDuckAdapter({
+    publicAccount: () => ({ signedIn: true }),
+    models: () => sample,
+    currentToken: async () => 'token',
+    logout: async () => {},
+  })
+  const listed = await duck.listModels('grok-build')
+  assert.equal(listed.length, sample.length)
+  for (const entry of listed) {
+    const resolved = await duck.resolveModel('grok-build', entry.id)
+    assert.deepEqual(
+      resolved.inputModalities,
+      entry.inputModalities,
+      `${entry.id}: resolveModel must match listModels`,
+    )
+    const expected = entry.id === 'grok-4.5' ? ['text'] : ['text', 'image']
+    assert.deepEqual(resolved.inputModalities, expected, `${entry.id}: expected ${expected.join('+')}`)
+  }
+})
+
+test('resolveModel keeps unknown models text-only', async () => {
+  const duck = createDuckAdapter({
+    publicAccount: () => ({ signedIn: true }),
+    models: () => [{ id: 'unknown-model', name: 'Unknown', reasoning: true, source: 'live' }],
+    currentToken: async () => 'token',
+    logout: async () => {},
+  })
+  assert.deepEqual((await duck.resolveModel('grok-build', 'unknown-model')).inputModalities, ['text'])
 })

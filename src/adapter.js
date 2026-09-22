@@ -656,7 +656,9 @@ function createDuckAdapter(session, adapterOptions = {}) {
         provider,
         id: model,
         name: found?.name ?? model,
-        inputModalities: ['text'],
+        // The host gates prompt attachment admission on resolveModelInfo, NOT on
+        // listModels, so this must match the catalog's modality map exactly.
+        inputModalities: supportsImageInput(model) ? ['text', 'image'] : ['text'],
         context: { contextWindow: raw?.contextWindow ?? 500_000 },
       }
       const reasoning = reasoningInfoOf(raw)

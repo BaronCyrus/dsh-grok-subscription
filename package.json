@@ -1,6 +1,6 @@
 {
   "name": "dsh-grok-subscription",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "Use a SuperGrok or X Premium Grok Build subscription in DeepSeek Harness",
   "type": "module",
   "main": "./lib/index.js",

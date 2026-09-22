@@ -1,7 +1,7 @@
 export const zh = {
   nav: 'Grok 订阅',
   title: 'Grok 订阅',
-  subtitle: '用 SuperGrok / X Premium（Grok Build）会话，而不是 XAI_API_KEY。· 1.0.7',
+  subtitle: '用 SuperGrok / X Premium（Grok Build）会话，而不是 XAI_API_KEY。· 1.0.8',
   signedIn: '已登录',
   signedOut: '未登录',
   account: '账户',
@@ -59,7 +59,7 @@ export const zh = {
 export const en = {
   nav: 'Grok Subscription',
   title: 'Grok Subscription',
-  subtitle: 'Use a SuperGrok / X Premium (Grok Build) session, not XAI_API_KEY. · 1.0.7',
+  subtitle: 'Use a SuperGrok / X Premium (Grok Build) session, not XAI_API_KEY. · 1.0.8',
   signedIn: 'Signed in',
   signedOut: 'Signed out',
   account: 'Account',
