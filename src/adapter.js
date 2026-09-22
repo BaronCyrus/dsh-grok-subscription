@@ -109,7 +109,40 @@ function mapFinish(reason) {
   return { kind: 'stop' }
 }
 
-async function* streamResponses(options, token) {
+/** Numbers only when they can survive a JSON round trip. */
+function finiteOr(value, fallback) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback
+}
+
+/**
+ * Drop everything the host refuses to persist (`undefined`, non-finite numbers,
+ * functions, symbols) from an outgoing chunk. DSH aborts the whole turn when a
+ * single stream chunk is not losslessly JSON-serializable, and that surfaces to
+ * the user as a silent "no reply", so this is the last line of defence.
+ */
+function jsonSafeChunk(value) {
+  if (value === null) return null
+  const type = typeof value
+  if (type === 'string' || type === 'boolean') return value
+  if (type === 'number') return Number.isFinite(value) && !Object.is(value, -0) ? value : undefined
+  if (type !== 'object') return undefined
+  if (Array.isArray(value)) {
+    const list = []
+    for (const item of value) {
+      const safe = jsonSafeChunk(item)
+      if (safe !== undefined) list.push(safe)
+    }
+    return list
+  }
+  const out = {}
+  for (const [key, item] of Object.entries(value)) {
+    const safe = jsonSafeChunk(item)
+    if (safe !== undefined) out[key] = safe
+  }
+  return out
+}
+
+async function* streamResponsesUnsafe(options, token) {
   const headers = {
     Accept: 'text/event-stream',
     'Content-Type': 'application/json',
@@ -165,8 +198,29 @@ async function* streamResponses(options, token) {
   let reasoningContent = ''
   let nextIndex = 0
   const toolBlocks = new Map()
+  // The arguments.delta event carries no `name`; it is announced on
+  // output_item.added / function_call_arguments.done, so remember it by call id.
+  const toolNames = new Map()
   let usage
   let finish = { kind: 'stop' }
+
+  const toolIdOf = payload => {
+    const id = payload?.item_id ?? payload?.call_id ?? payload?.id
+    return typeof id === 'string' && id ? id : undefined
+  }
+
+  const learnToolName = (id, name) => {
+    if (typeof id !== 'string' || !id || typeof name !== 'string' || !name) return
+    toolNames.set(id, name)
+    const tool = toolBlocks.get(id)
+    if (tool) tool.name = name
+  }
+
+  const adoptToolArguments = (id, value) => {
+    if (typeof id !== 'string' || typeof value !== 'string' || !value) return
+    const tool = toolBlocks.get(id)
+    if (tool && value.length > tool.arguments.length) tool.arguments = value
+  }
 
   const flushSse = function* (raw) {
     const lines = raw.split('\n')
@@ -211,12 +265,33 @@ async function* streamResponses(options, token) {
       yield { type: 'reasoning-delta', index: reasoningIndex, text: String(delta) }
       return
     }
+    if (type === 'response.output_item.added' || type === 'response.output_item.done') {
+      const item = payload.item
+      if (item?.type === 'function_call') {
+        learnToolName(item.id, item.name)
+        learnToolName(item.call_id, item.name)
+        adoptToolArguments(item.id, item.arguments)
+      }
+      return
+    }
+    if (type === 'response.function_call_arguments.done') {
+      const id = toolIdOf(payload)
+      learnToolName(id, payload.name)
+      adoptToolArguments(id, payload.arguments)
+      return
+    }
     if (type === 'response.function_call_arguments.delta') {
-      const id = payload.item_id ?? payload.call_id ?? payload.id
+      const id = toolIdOf(payload)
       if (!id) return
       let tool = toolBlocks.get(id)
       if (!tool) {
-        tool = { index: nextIndex++, id, name: payload.name ?? payload.item?.name, arguments: '' }
+        tool = {
+          index: nextIndex++,
+          id,
+          // Never leave this undefined: an unserializable chunk aborts the turn.
+          name: toolNames.get(id) ?? 'tool',
+          arguments: '',
+        }
         toolBlocks.set(id, tool)
         yield { type: 'block-start', index: tool.index, blockType: 'tool-call' }
       }
@@ -226,20 +301,40 @@ async function* streamResponses(options, token) {
       return
     }
     if (type === 'response.completed') {
+      // Recover names/arguments — and any call whose deltas never arrived —
+      // from the terminal snapshot before the finish reason is decided.
+      for (const item of payload.response?.output ?? []) {
+        if (item?.type !== 'function_call') continue
+        learnToolName(item.id, item.name)
+        learnToolName(item.call_id, item.name)
+        const id = typeof item.id === 'string' && item.id ? item.id : undefined
+        if (id && !toolBlocks.has(id)) {
+          const tool = { index: nextIndex++, id, name: toolNames.get(id) ?? 'tool', arguments: '' }
+          toolBlocks.set(id, tool)
+          yield { type: 'block-start', index: tool.index, blockType: 'tool-call' }
+        }
+        adoptToolArguments(id, item.arguments)
+      }
       const responseUsage = payload.response?.usage ?? payload.usage
       if (responseUsage) {
         usage = {
-          inputTokens: responseUsage.input_tokens ?? responseUsage.prompt_tokens ?? 0,
-          outputTokens: responseUsage.output_tokens ?? responseUsage.completion_tokens ?? 0,
-          totalTokens: responseUsage.total_tokens,
+          inputTokens: finiteOr(responseUsage.input_tokens ?? responseUsage.prompt_tokens, 0),
+          outputTokens: finiteOr(responseUsage.output_tokens ?? responseUsage.completion_tokens, 0),
         }
+        usage.totalTokens = finiteOr(responseUsage.total_tokens, usage.inputTokens + usage.outputTokens)
       }
       finish = mapFinish(payload.response?.status === 'incomplete' ? 'length' : 'stop')
       if (toolBlocks.size) finish = { kind: 'tool-calls' }
     }
     if (type === 'response.failed' || type === 'error') {
-      const message = payload.error?.message ?? payload.message ?? 'Grok Build stream failed'
-      finish = { kind: 'error', failure: { message, code: 'PROVIDER', status: payload.error?.status } }
+      const raw = payload.error?.message ?? payload.message
+      const failure = {
+        message: typeof raw === 'string' && raw ? raw : 'Grok Build stream failed',
+        code: 'PROVIDER',
+      }
+      const status = finiteOr(payload.error?.status, undefined)
+      if (status !== undefined) failure.status = status
+      finish = { kind: 'error', failure }
     }
   }
 
@@ -269,6 +364,17 @@ async function* streamResponses(options, token) {
   }
   if (usage) yield { type: 'usage', usage }
   yield { type: 'finish', reason: finish }
+}
+
+/**
+ * Responses SSE stream translated into host chunks, guaranteed to be free of
+ * values the host cannot persist. The host rejects the whole turn otherwise.
+ */
+export async function* streamResponses(options, token) {
+  for await (const chunk of streamResponsesUnsafe(options, token)) {
+    const safe = jsonSafeChunk(chunk)
+    if (safe) yield safe
+  }
 }
 
 /**
@@ -334,17 +440,13 @@ function createDuckAdapter(session) {
         yield* streamResponses(options, token)
       } catch (error) {
         const aborted = options.signal?.aborted === true
-        yield {
-          type: 'finish',
-          reason: {
-            kind: aborted ? 'aborted' : 'error',
-            failure: {
-              message: error instanceof Error ? error.message : 'Grok Build request failed',
-              code: aborted ? 'ABORTED' : 'PROVIDER',
-              status: error?.status,
-            },
-          },
+        const failure = {
+          message: error instanceof Error ? error.message : 'Grok Build request failed',
+          code: aborted ? 'ABORTED' : 'PROVIDER',
         }
+        const status = finiteOr(error?.status, undefined)
+        if (status !== undefined) failure.status = status
+        yield { type: 'finish', reason: { kind: aborted ? 'aborted' : 'error', failure } }
       }
     },
   }
@@ -563,4 +665,4 @@ export async function createGrokBuildAdapter(session, options = {}) {
   }
 }
 
-export { createDuckAdapter, responsesInput, streamResponses, withEncryptedReasoningInclude, wrapAsHostAdapter }
+export { createDuckAdapter, responsesInput, withEncryptedReasoningInclude, wrapAsHostAdapter }
