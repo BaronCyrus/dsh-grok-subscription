@@ -25,7 +25,7 @@ dsh plugin --profile web add BaronCyrus/dsh-grok-subscription
 # 或本地路径
 # dsh plugin --profile web add /absolute/path/to/dsh-grok-subscription
 # 或 npm（发布后）
-# dsh plugin --profile web add dsh-grok-subscription@0.1.9
+# dsh plugin --profile web add dsh-grok-subscription@0.1.10
 ```
 
 然后重启 `dsh web`，打开 **Settings → Grok 订阅**。也可以在设置页点击“CLI 登录”或“设备码登录”；设备码流程会在启动 DSH 的终端中显示提示。登录完成后点击“从 Grok CLI 拉取”可立即同步；Chat 模型列表会随之刷新。
@@ -45,6 +45,10 @@ npm install
 npm test
 npm run build
 ```
+
+## v0.1.10
+
+修复 0.1.9 实机：Pull 仍可能 45s 超时，且 **Settings → Plugins** 卡在 `Reading plugins…`（宿主 Settings/RPC 通道被楔住）。根因是 `apply`/`boot` 路径会 `await` 无超时的动态 `import`（`pi-ai` / `dsh-llm-pi-ai` / schemastery），且 `inject` 含 sticky 的 `credentials`。现 `inject` 收窄为 `['llm','web']`；`apply` 同步注册 duck adapter 后立即返回；schemastery / `session.pull` / pi-ai 升级全部 `setImmediate` 延后；所有动态 import 硬超时（默认 2.5s），超时则保持 duck。保留 0.1.9 内存优先 Pull 与 0.1.8 客户端 fire-and-forget。
 
 ## v0.1.9
 
@@ -104,6 +108,10 @@ dsh plugin --profile web add BaronCyrus/dsh-grok-subscription
 ```
 
 Reinstall after upgrades, restart `dsh web`, then open **Settings → Grok Subscription**.
+
+### v0.1.10
+
+Fixes 0.1.9 live hang: Pull could still hit the 45s client timeout, and **Settings → Plugins** stuck on `Reading plugins…` (host Settings/RPC channel wedged). Root cause: `apply`/`boot` awaited untimed dynamic `import`s (`pi-ai` / `dsh-llm-pi-ai` / schemastery), and `inject` listed sticky `credentials`. Now `inject` is `['llm','web']`; `apply` synchronously registers a duck adapter and returns; schemastery / `session.pull` / pi-ai upgrade are deferred via `setImmediate`; every dynamic import has a hard timeout (default 2.5s) and falls back to duck. Keeps 0.1.9 memory-first Pull and 0.1.8 client fire-and-forget.
 
 ### v0.1.9
 

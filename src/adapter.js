@@ -1,5 +1,6 @@
 import {
   DISPLAY_NAME,
+  IMPORT_TIMEOUT_MS,
   MAX_REQUEST_IMAGE_BYTES,
   PROVIDER_ID,
   PROXY_BASE_URL,
@@ -11,9 +12,37 @@ import {
 import { toLlmModels, toPiModels } from './catalog.js'
 import { buildProxyHeaders, fingerprintHeaders } from './headers.js'
 
-async function optionalImport(specifier) {
+function withImportTimeout(promise, ms, message) {
+  let timer
+  // Keep the timer ref'd: an unref'd timeout can let the event loop drain before
+  // the race settles (and would leave optionalImport hanging in idle hosts/tests).
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(message)), ms)
+    }),
+  ]).finally(() => {
+    if (timer) clearTimeout(timer)
+  })
+}
+
+/**
+ * Dynamic import with a hard timeout. Hanging module graphs (pi-ai / peer
+ * packages) must not wedge plugin apply / Settings RPC.
+ */
+export async function optionalImport(specifier, options = {}) {
+  const timeoutMs = typeof options.timeoutMs === 'number' && options.timeoutMs > 0
+    ? options.timeoutMs
+    : IMPORT_TIMEOUT_MS
+  const importFn = typeof options.importFn === 'function'
+    ? options.importFn
+    : (id => import(id))
   try {
-    return await import(specifier)
+    return await withImportTimeout(
+      Promise.resolve(importFn(specifier)),
+      timeoutMs,
+      `Import timed out after ${timeoutMs}ms: ${specifier}`,
+    )
   } catch {
     return undefined
   }
@@ -369,26 +398,48 @@ function withEncryptedReasoningInclude(api) {
   }
 }
 
-export async function createGrokBuildAdapter(session) {
+function wrapAsHostAdapter(candidate, dshLlm) {
+  if (!dshLlm?.LlmAdapter || candidate instanceof dshLlm.LlmAdapter) return candidate
+  class GrokBuildAdapter extends dshLlm.LlmAdapter {
+    providerInfo(provider) { return candidate.providerInfo(provider) }
+    providerRetryPolicy(provider) { return candidate.providerRetryPolicy(provider) }
+    listModels(provider) { return candidate.listModels(provider) }
+    resolveModel(provider, model, signal) { return candidate.resolveModel(provider, model, signal) }
+    prepareCall(provider, model, signal) { return candidate.prepareCall(provider, model, signal) }
+    stream(options) { return candidate.stream(options) }
+  }
+  return new GrokBuildAdapter()
+}
+
+/**
+ * Synchronous duck / host adapter — no dynamic imports of pi-ai or peers.
+ * Used so apply() can register immediately and return without wedging the loader.
+ */
+export function createGrokBuildAdapterSync(session, options = {}) {
+  const duck = createDuckAdapter(session)
+  const dshLlm = options.dshLlm
+  return {
+    adapter: wrapAsHostAdapter(duck, dshLlm),
+    kind: 'custom-mvp',
+    note: 'Registered a sync duck Responses adapter; pi-ai upgrade may follow in the background.',
+  }
+}
+
+/** Alias for createGrokBuildAdapterSync (no heavy dynamic imports). */
+export function createDuckHostAdapter(session, options = {}) {
+  return createGrokBuildAdapterSync(session, options)
+}
+
+export async function createGrokBuildAdapter(session, options = {}) {
+  const importOpts = options.importOptions ?? {}
   const [piAi, dshPi, dshLlm] = await Promise.all([
-    optionalImport('@earendil-works/pi-ai'),
-    optionalImport('@deepseek-ai/dsh-llm-pi-ai'),
-    optionalImport('@deepseek-ai/dsh-llm'),
+    optionalImport('@earendil-works/pi-ai', importOpts),
+    optionalImport('@deepseek-ai/dsh-llm-pi-ai', importOpts),
+    optionalImport('@deepseek-ai/dsh-llm', importOpts),
   ])
 
   const duck = createDuckAdapter(session)
-  const asHostAdapter = candidate => {
-    if (!dshLlm?.LlmAdapter || candidate instanceof dshLlm.LlmAdapter) return candidate
-    class GrokBuildAdapter extends dshLlm.LlmAdapter {
-      providerInfo(provider) { return candidate.providerInfo(provider) }
-      providerRetryPolicy(provider) { return candidate.providerRetryPolicy(provider) }
-      listModels(provider) { return candidate.listModels(provider) }
-      resolveModel(provider, model, signal) { return candidate.resolveModel(provider, model, signal) }
-      prepareCall(provider, model, signal) { return candidate.prepareCall(provider, model, signal) }
-      stream(options) { return candidate.stream(options) }
-    }
-    return new GrokBuildAdapter()
-  }
+  const asHostAdapter = candidate => wrapAsHostAdapter(candidate, dshLlm)
   if (!piAi?.createProvider || !dshPi?.PiAiAdapter) {
     return {
       adapter: asHostAdapter(duck),
@@ -399,8 +450,8 @@ export async function createGrokBuildAdapter(session) {
 
   let responsesApi
   try {
-    const lazy = await import('@earendil-works/pi-ai/api/openai-responses.lazy')
-    responsesApi = typeof lazy.openAIResponsesApi === 'function' ? lazy.openAIResponsesApi() : undefined
+    const lazy = await optionalImport('@earendil-works/pi-ai/api/openai-responses.lazy', importOpts)
+    responsesApi = typeof lazy?.openAIResponsesApi === 'function' ? lazy.openAIResponsesApi() : undefined
   } catch {
     responsesApi = undefined
   }
@@ -504,4 +555,4 @@ export async function createGrokBuildAdapter(session) {
   }
 }
 
-export { createDuckAdapter, responsesInput, streamResponses, withEncryptedReasoningInclude }
+export { createDuckAdapter, responsesInput, streamResponses, withEncryptedReasoningInclude, wrapAsHostAdapter }

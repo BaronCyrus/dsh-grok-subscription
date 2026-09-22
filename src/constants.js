@@ -41,3 +41,6 @@ export const REQUEST_IMAGE_PIXEL_BUDGET = 2048 * 2048
 export const REQUEST_IMAGE_MAX_BYTES = 1024 * 1024
 
 export const FALLBACK_MODEL_IDS = Object.freeze(['grok-4.7', 'grok-4.6', 'grok-4.5'])
+
+/** Hard ceiling for optional dynamic imports (pi-ai / schemastery / dsh-llm). */
+export const IMPORT_TIMEOUT_MS = 2_500
