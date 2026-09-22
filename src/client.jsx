@@ -35,7 +35,7 @@ function formatPercent(value) {
   return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1)
 }
 
-async function callRpc(rpc, endpoint, payload = {}) {
+async function callRpc(rpc, endpoint, payload = {}, timeoutMs = RPC_CALL_TIMEOUT_MS) {
   const controller = typeof AbortController !== 'undefined' ? new AbortController() : undefined
   let timer
   try {
@@ -44,7 +44,7 @@ async function callRpc(rpc, endpoint, payload = {}) {
       timer = setTimeout(() => {
         try { controller?.abort() } catch { /* ignore */ }
         reject(new Error(`Request timed out after ${RPC_CALL_TIMEOUT_MS}ms`))
-      }, RPC_CALL_TIMEOUT_MS)
+      }, timeoutMs)
     })
     return unwrap(await Promise.race([call, timeout]))
   } finally {
@@ -122,6 +122,102 @@ export function DiagnosticsRows({ diagnostics, t }) {
           {diagnostics.imageInput ? t('imageInputOn') : t('imageInputOff')}
         </span>
       </div>
+    </div>
+  )
+}
+
+function fillTemplate(template, values) {
+  return Object.entries(values).reduce(
+    (text, [key, value]) => text.replaceAll(`{${key}}`, value),
+    template,
+  )
+}
+
+export function VersionCard({ call, t }) {
+  const [info, setInfo] = useState()
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(false)
+  const [updating, setUpdating] = useState(false)
+  const [updateFailed, setUpdateFailed] = useState(false)
+  const [updated, setUpdated] = useState()
+  const [restartHint, setRestartHint] = useState(false)
+  const generation = useRef(0)
+
+  const load = force => {
+    const current = ++generation.current
+    setLoading(true)
+    setError(false)
+    void call('plugin/version', { force }).then(value => {
+      if (generation.current === current) setInfo(value)
+    }).catch(() => {
+      if (generation.current === current) setError(true)
+    }).finally(() => {
+      if (generation.current === current) setLoading(false)
+    })
+  }
+
+  useEffect(() => {
+    load(false)
+    return () => { generation.current += 1 }
+  }, [])
+
+  const update = () => {
+    setUpdating(true)
+    setUpdateFailed(false)
+    void call('plugin/update').then(value => {
+      setUpdated(value)
+      setRestartHint(false)
+    }).catch(() => setUpdateFailed(true)).finally(() => setUpdating(false))
+  }
+
+  const installKind = info?.install?.kind
+  const showStatus = info !== undefined && updated === undefined
+  return (
+    <div className="gsCard">
+      <div className="gsCardHead">
+        <h3>{t('versionTitle')}</h3>
+        <span className="gsSpacer" />
+        {updated === undefined ? (
+          <button className="gsBtn" type="button" disabled={loading || updating} onClick={() => load(true)}>
+            {loading ? t('versionChecking') : t('versionCheck')}
+          </button>
+        ) : null}
+      </div>
+      {loading && info === undefined ? <p className="gsStatus gsStatus--busy" role="status">{t('versionChecking')}</p> : null}
+      {error ? <p className="gsStatus gsStatus--error" role="alert">{t('versionFailed')}</p> : null}
+      {info !== undefined ? (
+        <div className="gsRows">
+          <div className="gsRow"><span>{t('versionCurrent')}</span><span className="gsRowValue">v{info.current}</span></div>
+          <div className="gsRow"><span>{t('versionLatest')}</span><span className="gsRowValue">v{info.latest}</span></div>
+        </div>
+      ) : null}
+      {showStatus ? (
+        <p className="gsStatus gsStatus--ok" role="status">
+          {info.updateAvailable ? fillTemplate(t('versionAvailable'), { version: info.latest }) : t('versionUpToDate')}
+        </p>
+      ) : null}
+      {showStatus && info.updateAvailable && installKind === 'npm' ? (
+        <div className="gsActions">
+          <button className="gsBtn gsBtn--primary" type="button" disabled={updating} onClick={update}>
+            {updating ? t('versionUpdating') : t('versionUpdate')}
+          </button>
+        </div>
+      ) : null}
+      {showStatus && installKind === 'link' ? <p className="gsHint">{t('versionLinked')}</p> : null}
+      {showStatus && info.updateAvailable && installKind === 'unknown' ? <p className="gsHint">{t('versionManual')}</p> : null}
+      {updateFailed ? <p className="gsStatus gsStatus--error" role="alert">{t('versionUpdateFailed')}</p> : null}
+      {updated !== undefined ? (
+        <div role="status">
+          <p className="gsStatus gsStatus--ok">{fillTemplate(t('versionUpdated'), { version: updated.version })}</p>
+          <p className="gsHint">{t('versionUpdatedHint')}</p>
+          {restartHint ? <p className="gsHint">{t('versionRestartHint')}</p> : null}
+          <div className="gsActions">
+            <button className="gsBtn" type="button" onClick={() => setRestartHint(true)}>{t('versionRestart')}</button>
+            <button className="gsBtn gsBtn--primary" type="button" onClick={() => window.location.reload()}>{t('versionRefresh')}</button>
+            <button className="gsBtn" type="button" onClick={() => setUpdated(undefined)}>{t('versionLater')}</button>
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -348,6 +444,16 @@ export function GrokSubscriptionSection({ rpc, t }) {
           </div>
         </details>
       </div>
+
+      <VersionCard
+        t={t}
+        call={(endpoint, payload) => callRpc(
+          rpc,
+          endpoint,
+          payload,
+          endpoint === 'plugin/update' ? 190_000 : RPC_CALL_TIMEOUT_MS,
+        )}
+      />
 
       <UsagePanel
         usage={status?.usage}

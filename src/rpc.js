@@ -71,7 +71,19 @@ function sanitizeUsage(usage) {
   return out
 }
 
-async function dispatch(session, endpoint, diagnostics) {
+function publicPluginVersion(value) {
+  const installKind = value?.install?.kind
+  return {
+    current: value.current,
+    latest: value.latest,
+    updateAvailable: value.updateAvailable === true,
+    install: {
+      kind: installKind === 'npm' || installKind === 'link' ? installKind : 'unknown',
+    },
+  }
+}
+
+async function dispatch(session, endpoint, diagnostics, payload, signal, pluginManager) {
   if (endpoint === 'status') {
     const status = await session.status()
     return publicResult(stripSecrets({
@@ -97,6 +109,17 @@ async function dispatch(session, endpoint, diagnostics) {
   }
   if (endpoint === 'login/cli') return publicResult(stripSecrets(await session.login({ device: false })))
   if (endpoint === 'login/device') return publicResult(stripSecrets(await session.login({ device: true })))
+  if (endpoint === 'plugin/version' || endpoint === 'plugin/update') {
+    if (!pluginManager) return publicError(new Error('Grok plugin update is unavailable'))
+    if (endpoint === 'plugin/version') {
+      return publicResult(publicPluginVersion(await pluginManager.read({
+        force: payload?.force === true,
+        signal,
+      })))
+    }
+    const updated = await pluginManager.update({ signal })
+    return publicResult({ version: updated.version })
+  }
   return publicError(new Error(`Unknown Grok subscription RPC: ${endpoint}`))
 }
 
@@ -104,10 +127,15 @@ export function createRpcHandler(session, options = {}) {
   const timeoutMs = typeof options.timeoutMs === 'number' && options.timeoutMs > 0
     ? options.timeoutMs
     : RPC_HANDLER_TIMEOUT_MS
-  return async function handle(endpoint, _payload, _signal) {
+  return async function handle(endpoint, payload, signal) {
     try {
+      const operation = dispatch(session, endpoint, options.diagnostics, payload, signal, options.pluginManager)
+      // Registry installs can take longer than an account RPC. The plugin
+      // manager owns that bounded timeout, so wrapping it here would cancel a
+      // healthy install.
+      if (endpoint === 'plugin/update') return await operation
       return await withTimeout(
-        dispatch(session, endpoint, options.diagnostics),
+        operation,
         timeoutMs,
         `Grok subscription RPC "${endpoint}" timed out after ${timeoutMs}ms`,
         { unref: false },

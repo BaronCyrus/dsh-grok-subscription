@@ -8,6 +8,8 @@ export const RPC_ENDPOINTS = Object.freeze([
   'catalog/refresh',
   'usage',
   'usage/refresh',
+  'plugin/version',
+  'plugin/update',
 ])
 
 export function createRpcClient(transport) {

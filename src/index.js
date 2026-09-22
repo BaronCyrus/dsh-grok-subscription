@@ -1,5 +1,6 @@
 import { CORDIS_ID, DISPLAY_NAME, DISPLAY_NAME_ZH, PROVIDER_ID, SETTINGS_NAMESPACE } from './constants.js'
 import { createSessionService } from './session.js'
+import { createGrokPluginManager } from './plugin-version.js'
 import { createRpcHandler } from './rpc.js'
 import { registerSubscriptionTransport } from './transport.js'
 import {
@@ -81,7 +82,9 @@ export function apply(ctx, options = {}) {
   // capability question ("why can't I attach an image?") is answerable without
   // reading logs.
   const adapterState = { kind: 'custom-mvp', upgraded: false }
+  const pluginManager = options.pluginManager ?? createGrokPluginManager()
   const handler = createRpcHandler(session, {
+    pluginManager,
     diagnostics: () => ({
       adapter: adapterState.upgraded ? 'pi-ai' : 'fallback',
       adapterKind: adapterState.kind,
