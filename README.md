@@ -9,12 +9,13 @@
 复用官方 Grok Build CLI 的登录会话，不需要 `XAI_API_KEY`。
 模型、推理档位和每周额度都留在 DSH 里。
 
+[![CI](https://github.com/BaronCyrus/dsh-grok-subscription/actions/workflows/ci.yml/badge.svg)](https://github.com/BaronCyrus/dsh-grok-subscription/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/dsh-grok-subscription?logo=npm&label=npm)](https://www.npmjs.com/package/dsh-grok-subscription)
 [![npm 总下载量](https://img.shields.io/npm/dt/dsh-grok-subscription?logo=npm&label=%E6%80%BB%E4%B8%8B%E8%BD%BD%E9%87%8F)](https://www.npmjs.com/package/dsh-grok-subscription)
 [![MIT](https://img.shields.io/badge/license-MIT-111111.svg)](LICENSE)
 [![Star](https://img.shields.io/github/stars/BaronCyrus/dsh-grok-subscription?style=flat&logo=github&label=Star)](https://github.com/BaronCyrus/dsh-grok-subscription/stargazers)
 
-[三步开始](#三步开始) · [安装](#安装) · [更新与卸载](#更新与卸载)
+[三步开始](#三步开始) · [安装](#安装) · [参与贡献](CONTRIBUTING.md) · [更新与卸载](#更新与卸载)
 
 </div>
 

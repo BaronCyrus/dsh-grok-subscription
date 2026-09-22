@@ -9,12 +9,13 @@
 Reuse the official Grok Build CLI session — no `XAI_API_KEY` needed.
 Models, reasoning effort, and weekly quota all stay inside DSH.
 
+[![CI](https://github.com/BaronCyrus/dsh-grok-subscription/actions/workflows/ci.yml/badge.svg)](https://github.com/BaronCyrus/dsh-grok-subscription/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/dsh-grok-subscription?logo=npm&label=npm)](https://www.npmjs.com/package/dsh-grok-subscription)
 [![total npm downloads](https://img.shields.io/npm/dt/dsh-grok-subscription?logo=npm&label=total%20downloads)](https://www.npmjs.com/package/dsh-grok-subscription)
 [![MIT](https://img.shields.io/badge/license-MIT-111111.svg)](LICENSE)
 [![Star](https://img.shields.io/github/stars/BaronCyrus/dsh-grok-subscription?style=flat&logo=github&label=Star)](https://github.com/BaronCyrus/dsh-grok-subscription/stargazers)
 
-[Three-step start](#three-step-start) · [Install](#install) · [Update and uninstall](#update-and-uninstall)
+[Three-step start](#three-step-start) · [Install](#install) · [Contribute](CONTRIBUTING.md) · [Update and uninstall](#update-and-uninstall)
 
 </div>
 
