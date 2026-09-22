@@ -13,6 +13,8 @@ export const PROXY_ORIGIN = 'https://cli-chat-proxy.grok.com'
 export const PROXY_BASE_URL = 'https://cli-chat-proxy.grok.com/v1'
 export const RESPONSES_URL = 'https://cli-chat-proxy.grok.com/v1/responses'
 export const MODELS_V2_URL = 'https://cli-chat-proxy.grok.com/v1/models-v2'
+export const BILLING_CREDITS_URL = 'https://cli-chat-proxy.grok.com/v1/billing?format=credits'
+export const USAGE_PAGE_URL = 'https://grok.com/?_s=usage'
 
 export const TOKEN_AUTH_HEADER = 'X-XAI-Token-Auth'
 export const TOKEN_AUTH_VALUE = 'xai-grok-cli'
@@ -31,6 +33,7 @@ export const API_KEY_AUTH_MODES = Object.freeze(['api_key'])
 
 export const AUTH_FILE_MAX_BYTES = 1_048_576
 export const CATALOG_TIMEOUT_MS = 15_000
+export const USAGE_TIMEOUT_MS = 15_000
 export const STREAM_IDLE_TIMEOUT_MS = 10 * 60 * 1000
 export const MAX_REQUEST_IMAGE_BYTES = 20 * 1024 * 1024
 export const REQUEST_IMAGE_PIXEL_BUDGET = 2048 * 2048
