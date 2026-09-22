@@ -3,7 +3,8 @@ import { spawn } from 'node:child_process'
 import { join } from 'node:path'
 import { CREDENTIAL_REF_NAME } from './constants.js'
 import { authJsonPath, grokHome, publicSessionView, readGrokAuthSession } from './auth-file.js'
-import { loadCatalog } from './catalog.js'
+import { loadCatalog as defaultLoadCatalog } from './catalog.js'
+import { fetchBillingUsage as defaultFetchBillingUsage, unavailableUsage } from './usage.js'
 
 export function resolveGrokBin(env = process.env, exists = existsSync) {
   if (typeof env.DSH_GROK_BIN === 'string' && env.DSH_GROK_BIN.trim()) return env.DSH_GROK_BIN.trim()
@@ -48,19 +49,36 @@ async function credentialRefOf() {
   return CREDENTIAL_REF_NAME
 }
 
-export function createSessionService({ credentials, logger, onCatalogChange } = {}) {
+function scheduleDeferred(run) {
+  if (typeof setImmediate === 'function') setImmediate(run)
+  else queueMicrotask(run)
+}
+
+export function createSessionService({
+  credentials,
+  logger,
+  onCatalogChange,
+  fetchBillingUsage: fetchBilling = defaultFetchBillingUsage,
+  loadCatalog: loadCatalogFn = defaultLoadCatalog,
+  readAuth = readGrokAuthSession,
+} = {}) {
   let catalog = { models: [], source: 'signed-out', error: undefined }
   let lastPublic = publicSessionView(undefined)
+  let lastUsage = unavailableUsage('Not fetched yet')
 
   const notifyCatalogChange = () => {
-    try {
-      onCatalogChange?.()
-    } catch (error) {
-      logger?.warn?.(
-        'Grok subscription catalog change notify failed: %s',
-        error instanceof Error ? error.message : 'unknown',
-      )
-    }
+    // Fail-soft and deferred so llm/adapters-updated listeners cannot re-enter
+    // credentials/llm while a Pull/status RPC critical path is still open.
+    scheduleDeferred(() => {
+      try {
+        onCatalogChange?.()
+      } catch (error) {
+        logger?.warn?.(
+          'Grok subscription catalog change notify failed: %s',
+          error instanceof Error ? error.message : 'unknown',
+        )
+      }
+    })
   }
 
   const readStoredToken = async () => {
@@ -80,23 +98,54 @@ export function createSessionService({ credentials, logger, onCatalogChange } = 
     await credentials.unset(await credentialRefOf())
   }
 
+  const refreshUsage = async () => {
+    const token = await readStoredToken()
+    if (!token) {
+      lastUsage = unavailableUsage('Not signed in')
+      return lastUsage
+    }
+    try {
+      lastUsage = await fetchBilling(token)
+    } catch (error) {
+      logger?.warn?.(
+        'Grok subscription usage fetch failed: %s',
+        error instanceof Error ? error.message : 'unknown',
+      )
+      lastUsage = unavailableUsage('Usage fetch failed')
+    }
+    return lastUsage
+  }
+
+  const kickBackgroundUsageRefresh = () => {
+    void refreshUsage().catch(error => {
+      logger?.warn?.(
+        'Grok subscription background usage refresh failed: %s',
+        error instanceof Error ? error.message : 'unknown',
+      )
+    })
+  }
+
   const pull = async () => {
-    const parsed = readGrokAuthSession()
+    const parsed = readAuth()
     if (!parsed.session) {
       catalog = { models: [], source: 'signed-out', error: undefined }
       lastPublic = publicSessionView(undefined)
+      lastUsage = unavailableUsage('Not signed in')
       await clearToken()
       const message = parsed.reason === 'api-key-only'
         ? 'Found an API-key entry only. Sign in with SuperGrok / X Premium via grok login.'
         : 'No Grok Build subscription session in auth.json. Run grok login first.'
       notifyCatalogChange()
-      return { ok: false, error: message, account: lastPublic, catalog }
+      return { ok: false, error: message, account: lastPublic, catalog, usage: lastUsage }
     }
     await storeToken(parsed.session.accessToken)
     lastPublic = publicSessionView(parsed.session)
-    catalog = await loadCatalog(parsed.session.accessToken)
+    catalog = await loadCatalogFn(parsed.session.accessToken)
+    // Critical path ends here: do NOT await billing. Background refresh updates
+    // lastUsage; client should also call usage/refresh after a successful pull.
     notifyCatalogChange()
-    return { ok: true, account: lastPublic, catalog }
+    kickBackgroundUsageRefresh()
+    return { ok: true, account: lastPublic, catalog, usage: lastUsage }
   }
 
   const status = async () => {
@@ -110,18 +159,21 @@ export function createSessionService({ credentials, logger, onCatalogChange } = 
     if (!token) {
       lastPublic = publicSessionView(undefined)
       catalog = { models: [], source: 'signed-out', error: undefined }
-      return { account: lastPublic, catalog, cliAvailable: grokCliAvailable(), authPath: authJsonPath() }
+      lastUsage = unavailableUsage('Not signed in')
+      return { account: lastPublic, catalog, usage: lastUsage, cliAvailable: grokCliAvailable(), authPath: authJsonPath() }
     }
     if (lastPublic.signedIn !== true) {
       try {
-        const parsed = readGrokAuthSession()
+        const parsed = readAuth()
         if (parsed.session) lastPublic = publicSessionView(parsed.session)
         else lastPublic = Object.freeze({ signedIn: true, maskedAccount: '••••', authMode: 'oidc', source: 'dsh-credentials' })
       } catch {
         lastPublic = Object.freeze({ signedIn: true, maskedAccount: '••••', authMode: 'oidc', source: 'dsh-credentials' })
       }
     }
-    return { account: lastPublic, catalog, cliAvailable: grokCliAvailable(), authPath: authJsonPath() }
+    // Return cached usage only. Billing is fetched via usage/refresh (or the
+    // background post-pull kick) — never on every Settings status load.
+    return { account: lastPublic, catalog, usage: lastUsage, cliAvailable: grokCliAvailable(), authPath: authJsonPath() }
   }
 
   const refreshCatalog = async () => {
@@ -131,7 +183,7 @@ export function createSessionService({ credentials, logger, onCatalogChange } = 
       notifyCatalogChange()
       return catalog
     }
-    catalog = await loadCatalog(token)
+    catalog = await loadCatalogFn(token)
     notifyCatalogChange()
     return catalog
   }
@@ -145,19 +197,22 @@ export function createSessionService({ credentials, logger, onCatalogChange } = 
     await clearToken()
     catalog = { models: [], source: 'signed-out', error: undefined }
     lastPublic = publicSessionView(undefined)
+    lastUsage = unavailableUsage('Not signed in')
     notifyCatalogChange()
-    return { ok: true, account: lastPublic, catalog }
+    return { ok: true, account: lastPublic, catalog, usage: lastUsage }
   }
 
   return {
     pull,
     status,
     refreshCatalog,
+    refreshUsage,
     login,
     logout,
     currentToken: readStoredToken,
     models: () => catalog.models,
     catalog: () => catalog,
+    usage: () => lastUsage,
     publicAccount: () => lastPublic,
   }
 }
