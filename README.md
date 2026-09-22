@@ -23,7 +23,7 @@ dsh plugin --profile web add BaronCyrus/dsh-grok-subscription
 # 或本地路径
 # dsh plugin --profile web add /absolute/path/to/dsh-grok-subscription
 # 或 npm（发布后）
-# dsh plugin --profile web add dsh-grok-subscription@0.1.2
+# dsh plugin --profile web add dsh-grok-subscription@0.1.3
 ```
 
 然后重启 `dsh web`，打开 **Settings → Grok 订阅**。也可以在设置页点击“CLI 登录”或“设备码登录”；设备码流程会在启动 DSH 的终端中显示提示。登录完成后点击“从 Grok CLI 拉取”可立即同步；Chat 模型列表会随之刷新。
@@ -43,6 +43,10 @@ npm install
 npm test
 npm run build
 ```
+
+## v0.1.3
+
+修复多轮 Chat 中助手正文不显示的问题：自定义 Responses 流在 `block-end` 时把已累计的 text/reasoning 写成空字符串，Harness `BlockAssembler` 会用空块覆盖流式增量，导致第 2 轮起界面只见思考（如 “Deep diving…”）不见正文。同时为 `grok-build` 强制 `include: reasoning.encrypted_content`（与 pi-ai 对 `xai` 的处理对齐），保证推理密文可回放。
 
 ## v0.1.2
 
@@ -72,7 +76,10 @@ v0.1.0 范围仍适用：仅文本/工具调用所需的 Responses 流、账号�
 dsh plugin --profile web add BaronCyrus/dsh-grok-subscription
 ```
 
-Reinstall after upgrades, restart `dsh web`, then open **Settings → Grok Subscription**. This is unofficial, may fall into a vendor-ToS gray area, and the undocumented wire protocol can change. Use your own account only.
+Reinstall after upgrades, restart `dsh web`, then open **Settings → Grok Subscription**.
+
+### v0.1.3
+Fixes multi-turn Chat where assistant body text vanished from turn 2 onward: the custom Responses SSE mapper ended text/reasoning blocks with empty strings, so Harness `BlockAssembler` replaced streamed deltas with blanks (UI could show "Deep diving…" then no body). Also forces `include: reasoning.encrypted_content` for `grok-build` so encrypted reasoning can replay on later turns. This is unofficial, may fall into a vendor-ToS gray area, and the undocumented wire protocol can change. Use your own account only.
 
 ## 还需要实机验证的部分
 

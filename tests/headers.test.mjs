@@ -16,7 +16,8 @@ test('builds the required subscription proxy headers without leaking extra endpo
   assert.equal(headers[TOKEN_AUTH_HEADER], TOKEN_AUTH_VALUE)
   assert.equal(headers[CLIENT_IDENTIFIER_HEADER], CLIENT_IDENTIFIER)
   assert.equal(headers[CLIENT_VERSION_HEADER], '1.0.5')
-  assert.equal(Object.keys(headers).length, 4)
+  assert.equal(headers['User-Agent'], `${CLIENT_IDENTIFIER}/1.0.5`)
+  assert.equal(Object.keys(headers).length, 5)
 })
 
 test('fingerprint headers omit Authorization so the token can be attached separately', () => {

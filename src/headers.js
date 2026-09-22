@@ -48,6 +48,7 @@ export function fingerprintHeaders(options = {}) {
     [TOKEN_AUTH_HEADER]: TOKEN_AUTH_VALUE,
     [CLIENT_IDENTIFIER_HEADER]: identifier,
     [CLIENT_VERSION_HEADER]: version,
+    'User-Agent': `${identifier}/${version}`,
   })
 }
 

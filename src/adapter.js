@@ -66,7 +66,10 @@ function responsesInput(options) {
       if (text) input.push({ role: 'assistant', content: text })
       continue
     }
-    input.push({ role, content: textOf(message.content) })
+    const text = textOf(message.content)
+    // Skip empty turns so a prior wipe / reasoning-only assistant does not poison replay.
+    if (!text) continue
+    input.push({ role, content: text })
   }
   return input
 }
@@ -104,7 +107,12 @@ async function* streamResponses(options, token) {
       parameters: tool.parameters,
     }))
   }
-  if (options.reasoningEffort) body.reasoning = { effort: options.reasoningEffort }
+  if (options.reasoningEffort) {
+    body.reasoning = { effort: options.reasoningEffort }
+    // Same-wire requirement as openai-responses for xAI-family reasoning models:
+    // without encrypted_content, later turns cannot replay reasoning items.
+    body.include = ['reasoning.encrypted_content']
+  }
 
   const response = await fetch(RESPONSES_URL, {
     method: 'POST',
@@ -124,6 +132,8 @@ async function* streamResponses(options, token) {
   let buffer = ''
   let textIndex
   let reasoningIndex
+  let textContent = ''
+  let reasoningContent = ''
   let nextIndex = 0
   const toolBlocks = new Map()
   let usage
@@ -153,16 +163,22 @@ async function* streamResponses(options, token) {
         textIndex = nextIndex++
         yield { type: 'block-start', index: textIndex, blockType: 'text' }
       }
+      textContent += delta
       yield { type: 'text-delta', index: textIndex, text: String(delta) }
       return
     }
-    if (type === 'response.reasoning_text.delta' || type === 'response.reasoning.delta') {
+    if (
+      type === 'response.reasoning_text.delta'
+      || type === 'response.reasoning.delta'
+      || type === 'response.reasoning_summary_text.delta'
+    ) {
       const delta = payload.delta ?? payload.text ?? ''
       if (!delta) return
       if (reasoningIndex === undefined) {
         reasoningIndex = nextIndex++
         yield { type: 'block-start', index: reasoningIndex, blockType: 'reasoning' }
       }
+      reasoningContent += delta
       yield { type: 'reasoning-delta', index: reasoningIndex, text: String(delta) }
       return
     }
@@ -210,10 +226,10 @@ async function* streamResponses(options, token) {
   if (buffer.trim()) yield* flushSse(buffer)
 
   if (reasoningIndex !== undefined) {
-    yield { type: 'block-end', index: reasoningIndex, block: { type: 'reasoning', text: '' } }
+    yield { type: 'block-end', index: reasoningIndex, block: { type: 'reasoning', text: reasoningContent } }
   }
   if (textIndex !== undefined) {
-    yield { type: 'block-end', index: textIndex, block: { type: 'text', text: '' } }
+    yield { type: 'block-end', index: textIndex, block: { type: 'text', text: textContent } }
   }
   for (const tool of toolBlocks.values()) {
     yield {
@@ -333,6 +349,26 @@ function buildAuthConfig() {
   }
 }
 
+
+/**
+ * Force include=reasoning.encrypted_content on every Responses call.
+ * pi-ai hard-codes that include for provider "xai" only; grok-build talks to the
+ * same family of reasoning models and needs the ciphertext for multi-turn replay.
+ */
+function withEncryptedReasoningInclude(api) {
+  const inject = options => ({
+    ...options,
+    samplingParams: {
+      ...options?.samplingParams,
+      include: ['reasoning.encrypted_content'],
+    },
+  })
+  return {
+    stream: (model, context, options) => api.stream(model, context, inject(options)),
+    streamSimple: (model, context, options) => api.streamSimple(model, context, inject(options)),
+  }
+}
+
 export async function createGrokBuildAdapter(session) {
   const [piAi, dshPi, dshLlm] = await Promise.all([
     optionalImport('@earendil-works/pi-ai'),
@@ -371,6 +407,9 @@ export async function createGrokBuildAdapter(session) {
   if (!responsesApi) {
     return { adapter: asHostAdapter(duck), kind: 'custom-mvp', note: 'openai-responses API module is unavailable; using the custom adapter.' }
   }
+  // pi-ai only auto-sets include for provider id "xai"; grok-build needs the same
+  // encrypted reasoning replay so turn 2+ keeps visible assistant text.
+  responsesApi = withEncryptedReasoningInclude(responsesApi)
 
   const store = createStore(session)
   const authModels = piAi.createModels({
@@ -390,7 +429,7 @@ export async function createGrokBuildAdapter(session) {
     headers: fingerprintHeaders(),
     auth: buildAuthConfig(),
     models: [],
-    api: responsesApi,
+    api: { 'openai-responses': responsesApi },
   })
   authModels.setProvider(authProvider)
 
@@ -412,7 +451,7 @@ export async function createGrokBuildAdapter(session) {
           model.provider === PROVIDER_ID ? model : { ...model, provider: PROVIDER_ID }
         ))
       },
-      api: responsesApi,
+      api: { 'openai-responses': responsesApi },
     })
     return {
       ...base,
@@ -465,4 +504,4 @@ export async function createGrokBuildAdapter(session) {
   }
 }
 
-export { createDuckAdapter }
+export { createDuckAdapter, responsesInput, streamResponses, withEncryptedReasoningInclude }
