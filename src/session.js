@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs'
 import { spawn } from 'node:child_process'
 import { join } from 'node:path'
-import { CREDENTIAL_REF_NAME } from './constants.js'
+import { CREDENTIAL_REF_NAME, STORE_TOKEN_TIMEOUT_MS } from './constants.js'
 import { authJsonPath, grokHome, publicSessionView, readGrokAuthSession } from './auth-file.js'
 import { loadCatalog as defaultLoadCatalog } from './catalog.js'
 import { fetchBillingUsage as defaultFetchBillingUsage, unavailableUsage } from './usage.js'
@@ -54,6 +54,18 @@ function scheduleDeferred(run) {
   else queueMicrotask(run)
 }
 
+function withTimeout(promise, ms, message) {
+  let timer
+  return Promise.race([
+    Promise.resolve(promise),
+    new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(message)), ms)
+    }),
+  ]).finally(() => {
+    if (timer) clearTimeout(timer)
+  })
+}
+
 export function createSessionService({
   credentials,
   logger,
@@ -61,6 +73,7 @@ export function createSessionService({
   fetchBillingUsage: fetchBilling = defaultFetchBillingUsage,
   loadCatalog: loadCatalogFn = defaultLoadCatalog,
   readAuth = readGrokAuthSession,
+  storeTokenTimeoutMs = STORE_TOKEN_TIMEOUT_MS,
 } = {}) {
   let catalog = { models: [], source: 'signed-out', error: undefined }
   let lastPublic = publicSessionView(undefined)
@@ -90,7 +103,22 @@ export function createSessionService({
 
   const storeToken = async token => {
     if (!credentials?.set) throw new Error('DSH credentials service is unavailable')
-    await credentials.set(await credentialRefOf(), token)
+    const ref = await credentialRefOf()
+    const timeoutMs = typeof storeTokenTimeoutMs === 'number' && storeTokenTimeoutMs > 0
+      ? storeTokenTimeoutMs
+      : STORE_TOKEN_TIMEOUT_MS
+    try {
+      await withTimeout(
+        credentials.set(ref, token),
+        timeoutMs,
+        `Storing Grok credential timed out after ${timeoutMs}ms`,
+      )
+    } catch (error) {
+      if (error instanceof Error && /timed out after/i.test(error.message)) throw error
+      throw error instanceof Error
+        ? error
+        : new Error('Failed to store Grok credential')
+    }
   }
 
   const clearToken = async () => {
@@ -116,10 +144,31 @@ export function createSessionService({
     return lastUsage
   }
 
+  const refreshCatalog = async () => {
+    const token = await readStoredToken()
+    if (!token) {
+      catalog = { models: [], source: 'signed-out', error: undefined }
+      notifyCatalogChange()
+      return catalog
+    }
+    catalog = await loadCatalogFn(token)
+    notifyCatalogChange()
+    return catalog
+  }
+
   const kickBackgroundUsageRefresh = () => {
     void refreshUsage().catch(error => {
       logger?.warn?.(
         'Grok subscription background usage refresh failed: %s',
+        error instanceof Error ? error.message : 'unknown',
+      )
+    })
+  }
+
+  const kickBackgroundCatalogRefresh = () => {
+    void refreshCatalog().catch(error => {
+      logger?.warn?.(
+        'Grok subscription background catalog refresh failed: %s',
         error instanceof Error ? error.message : 'unknown',
       )
     })
@@ -138,12 +187,12 @@ export function createSessionService({
       notifyCatalogChange()
       return { ok: false, error: message, account: lastPublic, catalog, usage: lastUsage }
     }
+    // Critical path: local auth.json + credential store only. No outbound network.
+    // Catalog/usage are refreshed in background (and by client catalog/refresh + usage/refresh).
     await storeToken(parsed.session.accessToken)
     lastPublic = publicSessionView(parsed.session)
-    catalog = await loadCatalogFn(parsed.session.accessToken)
-    // Critical path ends here: do NOT await billing. Background refresh updates
-    // lastUsage; client should also call usage/refresh after a successful pull.
     notifyCatalogChange()
+    kickBackgroundCatalogRefresh()
     kickBackgroundUsageRefresh()
     return { ok: true, account: lastPublic, catalog, usage: lastUsage }
   }
@@ -174,18 +223,6 @@ export function createSessionService({
     // Return cached usage only. Billing is fetched via usage/refresh (or the
     // background post-pull kick) — never on every Settings status load.
     return { account: lastPublic, catalog, usage: lastUsage, cliAvailable: grokCliAvailable(), authPath: authJsonPath() }
-  }
-
-  const refreshCatalog = async () => {
-    const token = await readStoredToken()
-    if (!token) {
-      catalog = { models: [], source: 'signed-out', error: undefined }
-      notifyCatalogChange()
-      return catalog
-    }
-    catalog = await loadCatalogFn(token)
-    notifyCatalogChange()
-    return catalog
   }
 
   const login = async options => {

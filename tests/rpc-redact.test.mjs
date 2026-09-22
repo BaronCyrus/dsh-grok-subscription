@@ -47,3 +47,29 @@ test('usage RPC never returns tokens and sanitizes usage', async () => {
   assert.equal(refreshed.value.usage.accessToken, undefined)
   assert.equal(refreshed.value.account.accessToken, undefined)
 })
+
+test('catalog/refresh RPC returns stripSecrets catalog+account+usage (no tokens)', async () => {
+  const handler = createRpcHandler({
+    refreshCatalog: async () => ({
+      source: 'live',
+      models: [{ id: 'grok-4.7', name: 'Grok 4.7', key: 'nope' }],
+      accessToken: 'LEAK',
+    }),
+    publicAccount: () => ({ signedIn: true, maskedAccount: 'a•••e', accessToken: 'LEAK' }),
+    usage: () => ({
+      status: 'ok',
+      usedPercent: 2,
+      remainingPercent: 98,
+      token: 'LEAK',
+    }),
+  })
+  const result = await handler('catalog/refresh', {}, undefined)
+  assert.equal(result.ok, true)
+  assert.equal(result.value.catalog.source, 'live')
+  assert.equal(result.value.catalog.models[0].id, 'grok-4.7')
+  assert.equal(result.value.catalog.models[0].key, undefined)
+  assert.equal(result.value.catalog.accessToken, undefined)
+  assert.equal(result.value.account.accessToken, undefined)
+  assert.equal(result.value.usage.usedPercent, 2)
+  assert.equal(result.value.usage.token, undefined)
+})

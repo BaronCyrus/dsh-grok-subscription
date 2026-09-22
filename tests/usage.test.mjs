@@ -138,3 +138,53 @@ test('fetchBillingUsage without a token is unavailable', async () => {
   assert.equal(result.status, 'unavailable')
   assert.match(result.reason, /signed in/i)
 })
+
+
+test('empty object missing percent explains empty object', () => {
+  const parsed = parseBillingCredits({})
+  assert.equal(parsed.status, 'unavailable')
+  assert.match(parsed.reason, /creditUsagePercent/i)
+  assert.match(parsed.reason, /empty object/i)
+  assert.equal(parsed.usedPercent, undefined)
+})
+
+test('fetchBillingUsage hard-timeouts even if fetch never settles', async () => {
+  const started = Date.now()
+  const result = await fetchBillingUsage('token', {
+    timeoutMs: 50,
+    fetch: () => new Promise(() => {
+      // Intentionally never resolves (AbortSignal alone would not help).
+    }),
+  })
+  const elapsed = Date.now() - started
+  assert.equal(result.status, 'unavailable')
+  assert.match(result.reason, /timed out/i)
+  assert.equal(result.usedPercent, undefined)
+  assert.ok(elapsed < 400, `expected hard race timeout, took ${elapsed}ms`)
+})
+
+test('fetchBillingUsage surfaces non-JSON Content-Type', async () => {
+  const result = await fetchBillingUsage('token', {
+    fetch: async () => new Response('<html>nope</html>', {
+      status: 200,
+      headers: { 'content-type': 'text/html; charset=utf-8' },
+    }),
+  })
+  assert.equal(result.status, 'unavailable')
+  assert.match(result.reason, /Content-Type/i)
+  assert.match(result.reason, /text\/html/i)
+  assert.equal(result.usedPercent, undefined)
+})
+
+test('fetchBillingUsage accepts JSON body despite wrong Content-Type when parseable', async () => {
+  const result = await fetchBillingUsage('token', {
+    fetch: async () => new Response(JSON.stringify({
+      config: { creditUsagePercent: 5 },
+    }), {
+      status: 200,
+      headers: { 'content-type': 'text/html' },
+    }),
+  })
+  assert.equal(result.status, 'ok')
+  assert.equal(result.usedPercent, 5)
+})

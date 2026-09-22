@@ -44,7 +44,7 @@ async function callRpc(rpc, endpoint, payload = {}) {
   }
 }
 
-function UsagePanel({ usage, t, busy, onRefresh, signedIn }) {
+function UsagePanel({ usage, t, usageBusy, onRefresh, signedIn }) {
   const ok = usage?.status === 'ok'
   const used = ok ? formatPercent(usage.usedPercent) : undefined
   const remaining = ok ? formatPercent(usage.remainingPercent) : undefined
@@ -87,8 +87,9 @@ function UsagePanel({ usage, t, busy, onRefresh, signedIn }) {
           {usage?.reason ? `: ${usage.reason}` : ''}
         </p>
       )}
+      {usageBusy ? <p className="muted">{t('busyUsage')}</p> : null}
       <div className="row">
-        <button type="button" disabled={Boolean(busy) || !signedIn} onClick={onRefresh}>
+        <button type="button" disabled={Boolean(usageBusy) || !signedIn} onClick={onRefresh}>
           {t('usageRefresh')}
         </button>
         <a href={USAGE_PAGE_URL} target="_blank" rel="noreferrer">{t('usageOpenGrok')}</a>
@@ -99,6 +100,7 @@ function UsagePanel({ usage, t, busy, onRefresh, signedIn }) {
 
 export function GrokSubscriptionSection({ rpc, t }) {
   const [busy, setBusy] = useState('')
+  const [usageBusy, setUsageBusy] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [status, setStatus] = useState(undefined)
@@ -138,8 +140,31 @@ export function GrokSubscriptionSection({ rpc, t }) {
       })
   }, [rpc])
 
+  const kickFollowUpRefresh = () => {
+    // Fire-and-forget: never set global busy (keeps Pull/login/logout buttons enabled).
+    void callRpc(rpc, 'catalog/refresh', {})
+      .then(partial => {
+        applyPartial(partial)
+      })
+      .catch(() => {
+        // Soft: catalog may still refresh via background/session kick.
+      })
+    void callRpc(rpc, 'usage/refresh', {})
+      .then(partial => {
+        applyPartial(partial)
+      })
+      .catch(() => {
+        // Soft: leave cached usage / Not fetched yet.
+      })
+  }
+
   const run = async (endpoint) => {
-    setBusy(endpoint)
+    const isUsageRefresh = endpoint === 'usage/refresh'
+    if (isUsageRefresh) {
+      setUsageBusy(true)
+    } else {
+      setBusy(endpoint)
+    }
     setError('')
     setNotice('')
     let value
@@ -167,29 +192,18 @@ export function GrokSubscriptionSection({ rpc, t }) {
       setNotice('')
       setError(item instanceof Error ? item.message : String(item))
     } finally {
-      setBusy('')
+      if (isUsageRefresh) setUsageBusy(false)
+      else setBusy('')
     }
 
-    // After a successful pull/login, refresh usage separately so Pull never
-    // blocks on billing and the UI still gets a fresh usage panel.
-    const shouldRefreshUsage = (
+    // After successful pull/login: busy already cleared + pullOk/loginOk shown.
+    // Catalog + usage refresh are fire-and-forget (do not hold Working… / disable buttons).
+    const shouldFollowUp = (
       (endpoint === 'pull' || endpoint === 'login/cli' || endpoint === 'login/device')
       && value?.ok !== false
       && !value?.error
     )
-    if (shouldRefreshUsage) {
-      setBusy('usage/refresh')
-      try {
-        const usageValue = await callRpc(rpc, 'usage/refresh', {})
-        applyPartial(usageValue)
-        if (usageValue?.ok !== false) setNotice(t('usageRefreshOk'))
-      } catch (item) {
-        // Keep pull success notice; surface usage error only if no other error.
-        setError(current => current || (item instanceof Error ? item.message : String(item)))
-      } finally {
-        setBusy('')
-      }
-    }
+    if (shouldFollowUp) kickFollowUpRefresh()
   }
 
   const account = status?.account
@@ -236,7 +250,7 @@ export function GrokSubscriptionSection({ rpc, t }) {
       <UsagePanel
         usage={status?.usage}
         t={t}
-        busy={busy}
+        usageBusy={usageBusy}
         signedIn={signedIn}
         onRefresh={() => void run('usage/refresh')}
       />

@@ -12,7 +12,7 @@
 - 设置页显示脱敏账户、登录状态、模型与最近一次目录错误，并提供 CLI 登录、设备码登录、从 Grok CLI 拉取、退出登录。
 - **实验性用量显示**：登录后从未文档化的 `GET /v1/billing?format=credits` 读取 `config.creditUsagePercent`（兼容顶层）与周期结束时间；失败时显示「不可用」且**绝不编造百分比**。不影响 Chat。
 - Pull / 登录 / 退出 / 目录刷新后通过 `llm/adapters-updated` 通知 Web 客户端刷新 Chat / New Session 模型选择器（emit 延后，避免与 Pull RPC 重入）。
-- 设置页 Pull **不阻塞**于 billing；用量由独立的 `usage/refresh`（及 Pull 后的后台刷新）更新；`status` 只读缓存。
+- 设置页 Pull **零出站网络**：只读本地 auth.json + 写入 credentials（带超时）；目录与用量由后台及客户端 fire-and-forget 的 `catalog/refresh` / `usage/refresh` 更新（不占用全局 busy）；`status` 只读缓存。
 
 ## 安装
 
@@ -25,7 +25,7 @@ dsh plugin --profile web add BaronCyrus/dsh-grok-subscription
 # 或本地路径
 # dsh plugin --profile web add /absolute/path/to/dsh-grok-subscription
 # 或 npm（发布后）
-# dsh plugin --profile web add dsh-grok-subscription@0.1.6
+# dsh plugin --profile web add dsh-grok-subscription@0.1.8
 ```
 
 然后重启 `dsh web`，打开 **Settings → Grok 订阅**。也可以在设置页点击“CLI 登录”或“设备码登录”；设备码流程会在启动 DSH 的终端中显示提示。登录完成后点击“从 Grok CLI 拉取”可立即同步；Chat 模型列表会随之刷新。
@@ -45,6 +45,14 @@ npm install
 npm test
 npm run build
 ```
+
+## v0.1.8
+
+修复 0.1.7 实机：Pull 成功后客户端仍 await `usage/refresh` 并占用全局 busy，导致 Working… 卡住、按钮一直 disabled。现 Pull/登录成功后立即清 busy 并显示成功提示；`catalog/refresh` 与 `usage/refresh` 为 fire-and-forget（不置全局 busy）。仅「刷新用量」按钮使用本地 `usageBusy`。`fetchBillingUsage` 增加独立于 AbortSignal 的硬 `Promise.race` 超时（默认 8s）；空 JSON `{}` 与非 JSON Content-Type 会写入更明确的不可用原因。
+
+## v0.1.7
+
+修复设置页 Pull 仍卡住 Working…（0.1.6 去掉 billing 后仍可能卡在 `credentials.set` 或 `loadCatalog`）：Pull 关键路径**零出站网络**，`storeToken` 硬超时（默认 5s），立即返回缓存目录/用量；后台 kick `refreshCatalog` + `refreshUsage`；客户端在 Pull 成功后另行 `catalog/refresh` 与 `usage/refresh`（独立 busy 文案）。`notifyCatalogChange` 仍仅延后触发。
 
 ## v0.1.6
 
@@ -93,7 +101,14 @@ dsh plugin --profile web add BaronCyrus/dsh-grok-subscription
 
 Reinstall after upgrades, restart `dsh web`, then open **Settings → Grok Subscription**.
 
-### v0.1.6
+### v0.1.8
+
+Fixes 0.1.7 live hang: after Pull the client no longer awaits `usage/refresh` while holding global busy (Working… / all buttons disabled). Pull/login clear busy and show success immediately; catalog + usage refresh are fire-and-forget. Only the Usage Refresh button uses local `usageBusy`. `fetchBillingUsage` has a hard Promise.race timeout (default 8s) independent of AbortSignal; empty `{}` and non-JSON Content-Type get clearer unavailable reasons.
+
+### v0.1.7
+Fixes Settings Pull hang after 0.1.6: zero-network Pull path, `storeToken` hard timeout (default 5s), returns cached catalog/usage immediately; background kick of `refreshCatalog` + `refreshUsage`; client follows up with `catalog/refresh` and `usage/refresh`. Catalog notify stays deferred.
+
+## v0.1.6
 Fixes Settings Pull hang (Working…) and stale Unavailable usage: Pull no longer awaits billing; `status()` returns cached usage only; client calls `usage/refresh` after successful Pull; catalog notify is deferred; client RPC has a safety timeout. Keeps 0.1.5 config.* parsing.
 
 ### v0.1.5

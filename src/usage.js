@@ -66,8 +66,10 @@ function topLevelKeys(body) {
 
 function missingPercentReason(body) {
   const keys = topLevelKeys(body)
-  const suffix = keys.length ? ` (keys: ${keys.join(',')})` : ''
-  return `Missing creditUsagePercent${suffix}`
+  if (keys.length === 0) {
+    return 'Missing creditUsagePercent (empty object)'
+  }
+  return `Missing creditUsagePercent (keys: ${keys.join(',')})`
 }
 
 function firstDefined(...values) {
@@ -230,6 +232,7 @@ export function parseBillingCredits(body) {
 
 export function parseBillingCreditsJson(text) {
   if (typeof text !== 'string') return unavailable('Non-text billing response')
+  if (!text.trim()) return unavailable('Empty billing response')
   let body
   try {
     body = JSON.parse(text)
@@ -239,10 +242,7 @@ export function parseBillingCreditsJson(text) {
   return parseBillingCredits(body)
 }
 
-export async function fetchBillingUsage(accessToken, options = {}) {
-  if (typeof accessToken !== 'string' || accessToken.length === 0) {
-    return unavailable('Not signed in')
-  }
+async function fetchBillingUsageOnce(accessToken, options = {}) {
   const fetchImpl = options.fetch ?? globalThis.fetch
   if (typeof fetchImpl !== 'function') {
     return unavailable('Fetch unavailable')
@@ -273,12 +273,34 @@ export async function fetchBillingUsage(accessToken, options = {}) {
     return unavailable(`Billing HTTP ${response.status}`)
   }
 
+  const rawContentType = typeof response.headers?.get === 'function'
+    ? (response.headers.get('content-type') ?? '')
+    : ''
+  const contentType = String(rawContentType).split(';')[0].trim()
+  const contentTypeLower = contentType.toLowerCase()
+  const looksJson = !contentTypeLower
+    || contentTypeLower.includes('json')
+    || contentTypeLower === 'text/plain'
+
   let text
   try {
     text = await response.text()
   } catch {
     return unavailable('Could not read billing body')
   }
+
+  if (!looksJson) {
+    // Still attempt parse in case a gateway mislabels JSON; surface CT on failure.
+    const parsedAnyway = parseBillingCreditsJson(text)
+    if (parsedAnyway.status === 'ok') {
+      return Object.freeze({
+        ...parsedAnyway,
+        fetchedAt: new Date().toISOString(),
+      })
+    }
+    return unavailable(`Non-JSON billing Content-Type: ${contentType || 'unknown'}`)
+  }
+
   const parsed = parseBillingCreditsJson(text)
   if (parsed.status === 'ok') {
     return Object.freeze({
@@ -287,6 +309,36 @@ export async function fetchBillingUsage(accessToken, options = {}) {
     })
   }
   return parsed
+}
+
+/**
+ * Hard wall-clock timeout via Promise.race, independent of fetch AbortSignal.
+ * Always resolves to unavailable on timeout — never hangs the Settings RPC.
+ */
+export async function fetchBillingUsage(accessToken, options = {}) {
+  if (typeof accessToken !== 'string' || accessToken.length === 0) {
+    return unavailable('Not signed in')
+  }
+  const timeoutMs = options.timeoutMs ?? USAGE_TIMEOUT_MS
+  let timer
+  try {
+    const result = await Promise.race([
+      fetchBillingUsageOnce(accessToken, options),
+      new Promise(resolve => {
+        timer = setTimeout(
+          () => resolve(unavailable('Billing request timed out')),
+          timeoutMs,
+        )
+      }),
+    ])
+    return result
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'network error'
+    if (/abort|timeout/i.test(message)) return unavailable('Billing request timed out')
+    return unavailable('Billing network error')
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
 }
 
 export { unavailable as unavailableUsage }

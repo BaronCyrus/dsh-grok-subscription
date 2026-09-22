@@ -20,6 +20,8 @@ export const zh = {
   deviceHint: '设备码提示会出现在 DSH 终端。也可手动运行 grok login --device-auth，完成后点“从 Grok CLI 拉取”。',
   pullHint: '安全读取 ~/.grok/auth.json（拒绝符号链接与组/其他人可读），只把短期 access token 写入 DSH。',
   busy: '处理中…',
+  busyCatalog: '正在刷新模型目录…',
+  busyUsage: '正在刷新用量…',
   error: '操作失败',
   pullOk: '已从 Grok CLI 拉取成功',
   loginOk: '登录完成，会话已同步',
@@ -37,6 +39,7 @@ export const zh = {
   usageProduct: '产品明细',
   usageFetchedAt: '最近刷新',
   usageRefreshOk: '用量已刷新',
+  catalogRefreshOk: '模型目录已刷新',
 }
 
 export const en = {
@@ -61,6 +64,8 @@ export const en = {
   deviceHint: 'The device-code prompt appears in the DSH terminal. You can also run grok login --device-auth yourself, then Pull from Grok CLI.',
   pullHint: 'Reads ~/.grok/auth.json securely (refuses symlinks and group/other-readable files) and stores only the short-lived access token in DSH.',
   busy: 'Working…',
+  busyCatalog: 'Refreshing model catalog…',
+  busyUsage: 'Refreshing usage…',
   error: 'Request failed',
   pullOk: 'Pulled from Grok CLI successfully',
   loginOk: 'Signed in and session synced',
@@ -78,6 +83,7 @@ export const en = {
   usageProduct: 'Product breakdown',
   usageFetchedAt: 'Last refreshed',
   usageRefreshOk: 'Usage refreshed',
+  catalogRefreshOk: 'Model catalog refreshed',
 }
 
 export const messages = { zh, en }

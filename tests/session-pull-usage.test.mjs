@@ -19,15 +19,15 @@ function waitDeferred() {
   })
 }
 
-test('pull resolves without awaiting billing usage (even if billing never settles)', async () => {
+function neverResolves() {
+  return new Promise(() => {
+    // Intentionally never resolves.
+  })
+}
+
+test('pull resolves without awaiting loadCatalog or billing (even if they never settle)', async () => {
+  let catalogStarted = 0
   let billingStarted = 0
-  let billingSettled = false
-  const neverResolves = () => {
-    billingStarted += 1
-    return new Promise(() => {
-      // Intentionally never resolves — Pull must not await this.
-    })
-  }
 
   const session = createSessionService({
     credentials: {
@@ -36,27 +36,54 @@ test('pull resolves without awaiting billing usage (even if billing never settle
       unset: async () => {},
     },
     readAuth: () => ({ session: mockSession() }),
-    loadCatalog: async () => ({
-      models: [{ id: 'grok-4.7', name: 'Grok 4.7' }],
-      source: 'live',
-    }),
-    fetchBillingUsage: neverResolves,
+    loadCatalog: async () => {
+      catalogStarted += 1
+      return neverResolves()
+    },
+    fetchBillingUsage: async () => {
+      billingStarted += 1
+      return neverResolves()
+    },
   })
 
   const result = await Promise.race([
     session.pull(),
-    new Promise((_, reject) => setTimeout(() => reject(new Error('pull hung awaiting usage')), 300)),
+    new Promise((_, reject) => setTimeout(() => reject(new Error('pull hung awaiting catalog/usage')), 300)),
   ])
 
   assert.equal(result.ok, true)
-  assert.equal(result.catalog.source, 'live')
   assert.equal(result.account.signedIn, true)
-  // Cached / not-yet-fetched usage is returned; billing may start in background.
+  // Cached catalog (empty / signed-out until background or catalog/refresh fills it).
+  assert.equal(result.catalog.source, 'signed-out')
   assert.equal(result.usage.status, 'unavailable')
-  assert.equal(billingSettled, false)
-  // Allow the deferred background kick to schedule.
   await waitDeferred()
+  assert.ok(catalogStarted >= 1, 'background catalog refresh should be kicked')
   assert.ok(billingStarted >= 1, 'background usage refresh should be kicked')
+})
+
+test('pull fails fast when credentials.set never resolves (storeToken timeout)', async () => {
+  const session = createSessionService({
+    credentials: {
+      resolve: async () => ({ value: 'test-access-token' }),
+      set: async () => neverResolves(),
+      unset: async () => {},
+    },
+    readAuth: () => ({ session: mockSession() }),
+    loadCatalog: async () => neverResolves(),
+    fetchBillingUsage: async () => neverResolves(),
+    storeTokenTimeoutMs: 40,
+  })
+
+  const started = Date.now()
+  await assert.rejects(
+    () => session.pull(),
+    error => {
+      assert.match(String(error?.message ?? error), /timed out after 40ms/i)
+      return true
+    },
+  )
+  const elapsed = Date.now() - started
+  assert.ok(elapsed < 300, `expected fast timeout, took ${elapsed}ms`)
 })
 
 test('status returns cached usage and does not call billing by default', async () => {
@@ -102,8 +129,9 @@ test('notifyCatalogChange is deferred (does not run synchronously during pull)',
       set: async () => {},
     },
     readAuth: () => ({ session: mockSession() }),
-    loadCatalog: async () => ({ models: [], source: 'fallback' }),
-    fetchBillingUsage: async () => ({ status: 'unavailable', reason: 'skip', experimental: true }),
+    // Hang catalog so background refresh does not fire a second notify during this test window.
+    loadCatalog: async () => neverResolves(),
+    fetchBillingUsage: async () => neverResolves(),
     onCatalogChange: () => {
       calls += 1
     },
@@ -114,4 +142,28 @@ test('notifyCatalogChange is deferred (does not run synchronously during pull)',
   assert.equal(calls, 0, 'notify must not run before pull returns')
   await waitDeferred()
   assert.equal(calls, 1)
+})
+
+test('refreshCatalog returns live catalog and can run after a zero-network pull', async () => {
+  const session = createSessionService({
+    credentials: {
+      resolve: async () => ({ value: 'test-access-token' }),
+      set: async () => {},
+    },
+    readAuth: () => ({ session: mockSession() }),
+    loadCatalog: async () => ({
+      models: [{ id: 'grok-4.7', name: 'Grok 4.7' }],
+      source: 'live',
+    }),
+    fetchBillingUsage: async () => ({ status: 'unavailable', reason: 'skip', experimental: true }),
+  })
+
+  const pulled = await session.pull()
+  assert.equal(pulled.ok, true)
+  assert.equal(pulled.catalog.source, 'signed-out')
+
+  const catalog = await session.refreshCatalog()
+  assert.equal(catalog.source, 'live')
+  assert.equal(catalog.models[0].id, 'grok-4.7')
+  assert.equal(session.catalog().source, 'live')
 })
