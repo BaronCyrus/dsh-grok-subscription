@@ -8,6 +8,9 @@ const NOW = Date.parse('2026-09-22T08:00:00Z')
 const DEVICE_URL = 'https://accounts.x.ai/oauth2/device?user_code=84F2-MKGY'
 const CLI_OUTPUT = `\nTo sign in, open this URL in your browser:\n\n  ${DEVICE_URL}\n\nConfirm this code in your browser:\n\n  84F2-MKGY\n\nWaiting for authorization...\n`
 
+/** Spawn resolves the child environment before it starts the process. */
+const afterSpawn = () => new Promise(resolve => setImmediate(resolve))
+
 const grokSession = token => ({
   accessToken: token,
   expiresAt: new Date(NOW + 3_600_000).toISOString(),
@@ -88,6 +91,7 @@ test('spawnGrokLogin answers with the link the CLI prints and opens it', async (
     openUrl: url => { opened.push(url) },
     startTimeoutMs: 50,
   })
+  await afterSpawn()
   child.stderr.emit('data', CLI_OUTPUT)
   const result = await pending
   assert.equal(result.ok, true)
@@ -112,6 +116,7 @@ test('a silent CLI answers without a link and is left running', async () => {
 test('a CLI that owns the terminal keeps the resolve-on-exit behaviour', async () => {
   const child = new EventEmitter()
   const pending = spawnGrokLogin({ ...binOptions, spawn: () => child, stdio: 'inherit' })
+  await afterSpawn()
   child.emit('exit', 0)
   const result = await pending
   assert.equal(result.pending, false)
@@ -122,6 +127,7 @@ test('a non-zero exit before the link rejects', async () => {
   const child = fakeLoginChild()
   const pending = spawnGrokLogin({ ...binOptions, spawn: () => child, startTimeoutMs: 50 })
   const rejection = assert.rejects(pending, /exited with code 2/)
+  await afterSpawn()
   child.emit('exit', 2)
   await rejection
 })
@@ -155,6 +161,7 @@ test('login replies while the browser round trip is pending, then syncs the sess
   })
   const child = fakeLoginChild()
   const pending = service.login({ ...binOptions, spawn: () => child, openUrl: () => {}, startTimeoutMs: 50 })
+  await afterSpawn()
   child.stderr.emit('data', CLI_OUTPUT)
   const started = await pending
   assert.equal(started.ok, true)
@@ -180,6 +187,7 @@ test('a CLI that finishes login itself syncs before the reply', async () => {
   })
   const child = new EventEmitter()
   const pending = service.login({ ...binOptions, spawn: () => child, openUrl: () => {}, stdio: 'inherit', startTimeoutMs: 5 })
+  await afterSpawn()
   child.emit('exit', 0)
   const result = await pending
   assert.equal(result.pending, false)

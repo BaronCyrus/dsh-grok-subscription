@@ -13,6 +13,7 @@ import { authJsonPath, grokHome, publicSessionView, readGrokAuthSession } from '
 import { loadCatalog as defaultLoadCatalog } from './catalog.js'
 import { fetchBillingUsage as defaultFetchBillingUsage, unavailableUsage } from './usage.js'
 import { optionalImport } from './adapter.js'
+import { hostProxyEnvironment } from './proxy.js'
 
 export function resolveGrokBin(env = process.env, exists = existsSync) {
   if (typeof env.DSH_GROK_BIN === 'string' && env.DSH_GROK_BIN.trim()) return env.DSH_GROK_BIN.trim()
@@ -41,8 +42,10 @@ const STANDARD_PROXY_NAMES = [
  * sign-in hosts on a network that needs a tunnel — but putting `http_proxy` in
  * DSH's own environment would route every provider request through that tunnel
  * and break them all whenever it is down. `GROK_CLI_PROXY` (or the shared
- * `GROK_PROXY`) is therefore applied to this child alone. Explicit standard
- * variables, when the surrounding environment already carries them, keep winning.
+ * `GROK_PROXY`) is therefore applied to this child alone. A host proxy policy
+ * already materialized into the environment (what `@deepseek-ai/dsh-http-proxy`
+ * publishes for every child) keeps winning, so this never calls
+ * `setGlobalDispatcher` and never rewrites the host's own variables.
  * @param env - the host environment to start from.
  * @returns the child environment.
  */
@@ -66,6 +69,27 @@ export function cliProxyEnv(env = process.env) {
     all_proxy: proxy,
     no_proxy: bypass,
   }
+}
+
+/**
+ * Environment for one grok CLI child.
+ *
+ * The host's proxy policy wins when it has one (`proxyEnvironmentForChild` —
+ * the same overlay `@deepseek-ai/dsh-http-proxy` gives every other child).
+ * Otherwise {@link cliProxyEnv} applies `GROK_PROXY` to this child alone.
+ * @param env - the host environment to start from.
+ * @returns the child environment.
+ */
+export async function resolveCliEnv(env = process.env) {
+  const base = env ?? process.env
+  const overlay = await hostProxyEnvironment()
+  if (!overlay) return cliProxyEnv(base)
+  const next = { ...base }
+  for (const [key, value] of Object.entries(overlay)) {
+    if (value === undefined) delete next[key]
+    else next[key] = value
+  }
+  return next
 }
 
 /**
@@ -122,7 +146,7 @@ const DEVICE_CODE_PATTERN = /\b([A-Z0-9]{4}-[A-Z0-9]{4})\b/u
  * @param options - env/bin overrides, injectable spawn/openUrl, start timeout.
  * @returns `{ ok, pending, loginUrl?, userCode?, child?, warning? }`.
  */
-export function spawnGrokLogin(options = {}) {
+export async function spawnGrokLogin(options = {}) {
   const spawnFn = options.spawn ?? spawn
   const bin = resolveGrokBin(options.env, options.exists)
   const args = options.device ? ['login', '--device-auth'] : ['login']
@@ -130,12 +154,13 @@ export function spawnGrokLogin(options = {}) {
     ? options.startTimeoutMs
     : LOGIN_START_TIMEOUT_MS
   const openUrl = options.openUrl ?? (url => openExternal(url, { spawn: options.openSpawn }))
+  const childEnv = await resolveCliEnv(options.env)
   return new Promise((resolve, reject) => {
     let child
     try {
       child = spawnFn(bin, args, {
         stdio: options.stdio ?? ['ignore', 'pipe', 'pipe'],
-        env: cliProxyEnv(options.env),
+        env: childEnv,
       })
     } catch (error) {
       reject(new Error(`Could not start grok CLI (${bin})`, { cause: error }))
@@ -213,18 +238,19 @@ export function spawnGrokLogin(options = {}) {
  * The CLI prints "You are not authenticated." even when it *did* refresh, so the
  * exit status says nothing useful — callers must re-read auth.json and compare.
  */
-export function spawnGrokRefresh(options = {}) {
+export async function spawnGrokRefresh(options = {}) {
   const spawnFn = options.spawn ?? spawn
   const bin = resolveGrokBin(options.env, options.exists)
   const timeoutMs = typeof options.timeoutMs === 'number' && options.timeoutMs > 0
     ? options.timeoutMs
     : CLI_REFRESH_TIMEOUT_MS
+  const childEnv = await resolveCliEnv(options.env)
   return new Promise((resolve, reject) => {
     let child
     try {
       child = spawnFn(bin, ['models'], {
         stdio: options.stdio ?? 'ignore',
-        env: cliProxyEnv(options.env),
+        env: childEnv,
       })
     } catch (error) {
       reject(new Error(`Could not start grok CLI (${bin})`, { cause: error }))

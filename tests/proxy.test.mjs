@@ -1,50 +1,30 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import {
-  GROK_API_HOSTS,
-  apiProxyUrl,
-  ensureApiRouting,
-  resetApiRouting,
-  setRoutingDependencies,
-} from '../src/proxy.js'
+import { apiProxyUrl, grokFetch, hostProxyEnvironment, resetGrokFetch, setProxyDependencies } from '../src/proxy.js'
 import { fetchLiveCatalog } from '../src/catalog.js'
 
-/** Minimal undici surface: records what the routing agent was built with. */
+/** Stand-in for the host undici: records the dispatcher its own fetch received. */
 function fakeUndici() {
-  const state = { set: [], proxyAgents: [], pools: [] }
+  const seen = []
   class FakeProxyAgent {
     constructor(url) {
       this.url = url
-      state.proxyAgents.push(url)
-    }
-  }
-  class FakePool {
-    constructor(origin, options) {
-      this.origin = origin
-      this.options = options
-      state.pools.push(origin)
-    }
-  }
-  let current = { name: 'host-dispatcher' }
-  class FakeAgent {
-    constructor(options) {
-      this.options = options
-      state.routing = options
-    }
-    route(origin) {
-      return this.options.factory(origin, { name: 'pool-options' })
     }
   }
   return {
-    state,
+    seen,
     undici: {
-      Agent: FakeAgent,
-      Pool: FakePool,
       ProxyAgent: FakeProxyAgent,
-      getGlobalDispatcher: () => current,
-      setGlobalDispatcher: next => { current = next; state.set.push(next) },
+      fetch: async (url, init) => {
+        seen.push({ url, dispatcher: init?.dispatcher })
+        return {
+          ok: true,
+          status: 200,
+          headers: { get: () => null },
+          arrayBuffer: async () => Buffer.from(JSON.stringify({ data: [{ id: 'grok-4.7' }] })),
+        }
+      },
     },
-    current: () => current,
   }
 }
 
@@ -58,69 +38,84 @@ test('GROK_API_PROXY wins, GROK_PROXY is the shared knob', () => {
   assert.equal(apiProxyUrl({ GROK_PROXY: '   ' }), undefined)
 })
 
-test('no configuration leaves the host dispatcher alone', async () => {
-  const fake = fakeUndici()
-  resetApiRouting()
-  setRoutingDependencies({ undici: fake.undici, hostProxies: async () => false })
-  assert.equal(await ensureApiRouting({}), 'direct')
-  assert.deepEqual(fake.state.set, [])
-  setRoutingDependencies({})
+test('no tunnel leaves the caller on the global fetch', async () => {
+  resetGrokFetch()
+  setProxyDependencies({ hostProxies: async () => false })
+  assert.equal(await grokFetch({}), undefined)
+  setProxyDependencies({})
 })
 
-test('a configured tunnel routes only the Grok origin', async () => {
-  const fake = fakeUndici()
-  resetApiRouting()
-  setRoutingDependencies({ undici: fake.undici, hostProxies: async () => false })
-  assert.equal(await ensureApiRouting({ GROK_PROXY: 'http://127.0.0.1:10808' }), 'plugin')
-  assert.equal(fake.state.set.length, 1)
-  assert.deepEqual(fake.state.proxyAgents, ['http://127.0.0.1:10808'])
-  assert.equal(await ensureApiRouting({ GROK_PROXY: 'http://127.0.0.1:10808' }), 'plugin')
-  assert.equal(fake.state.set.length, 1, 'installing twice must be idempotent')
-
-  const routing = fake.state.set[0]
-  assert.ok(routing.route(`https://${GROK_API_HOSTS[0]}`) instanceof fake.undici.ProxyAgent)
-  const other = routing.route('https://api.deepseek.com')
-  assert.ok(other instanceof fake.undici.Pool)
-  assert.equal(other.origin, 'https://api.deepseek.com')
-
-  assert.equal(resetApiRouting(), true)
-  assert.equal(fake.current().name, 'host-dispatcher', 'the previous dispatcher comes back')
-  setRoutingDependencies({})
+test('a SOCKS URL cannot be a ProxyAgent, so the caller stays on the global fetch', async () => {
+  resetGrokFetch()
+  setProxyDependencies({ hostProxies: async () => false })
+  assert.equal(await grokFetch({ GROK_PROXY: 'socks5h://127.0.0.1:10808' }), undefined)
+  setProxyDependencies({})
 })
 
-test('a host that already routes the origin is left untouched', async () => {
+test('the tunnel fetch is the host undici fetch, not the global one, and it is reused', async () => {
+  resetGrokFetch()
   const fake = fakeUndici()
-  resetApiRouting()
-  setRoutingDependencies({ undici: fake.undici, hostProxies: async () => true })
-  assert.equal(await ensureApiRouting({ GROK_PROXY: 'http://127.0.0.1:10808' }), 'host')
-  assert.deepEqual(fake.state.set, [])
-  setRoutingDependencies({})
+  setProxyDependencies({ undici: fake.undici, hostProxies: async () => false })
+  const first = await grokFetch({ GROK_PROXY: 'http://127.0.0.1:10808' })
+  const second = await grokFetch({ GROK_PROXY: 'http://127.0.0.1:10808' })
+  assert.equal(first, second)
+  const response = await first('https://cli-chat-proxy.grok.com/v1/models-v2', { method: 'GET' })
+  assert.equal(response.status, 200)
+  assert.equal(fake.seen.length, 1)
+  assert.ok(fake.seen[0].dispatcher instanceof fake.undici.ProxyAgent)
+  assert.equal(fake.seen[0].dispatcher.url, 'http://127.0.0.1:10808')
+  resetGrokFetch()
+  setProxyDependencies({})
 })
 
-test('a SOCKS URL cannot become a routing agent here', async () => {
+test('a host that already proxies the origin is left to its own fetch', async () => {
+  resetGrokFetch()
   const fake = fakeUndici()
-  resetApiRouting()
-  setRoutingDependencies({ undici: fake.undici, hostProxies: async () => false })
-  assert.equal(await ensureApiRouting({ GROK_PROXY: 'socks5h://127.0.0.1:10808' }), 'direct')
-  assert.deepEqual(fake.state.set, [])
-  setRoutingDependencies({})
+  setProxyDependencies({ undici: fake.undici, hostProxies: async () => true })
+  assert.equal(await grokFetch({ GROK_PROXY: 'http://127.0.0.1:10808' }), undefined)
+  assert.equal(fake.seen.length, 0)
+  setProxyDependencies({})
 })
 
-test('the catalog request goes out while the route is installed', async () => {
+test('the catalog uses that fetch and never the global dispatcher', async () => {
+  resetGrokFetch()
   const fake = fakeUndici()
-  resetApiRouting()
-  setRoutingDependencies({ undici: fake.undici, hostProxies: async () => false })
+  setProxyDependencies({ undici: fake.undici, hostProxies: async () => false })
+  const models = await fetchLiveCatalog('token', { env: { GROK_PROXY: 'http://127.0.0.1:10808' } })
+  assert.deepEqual(models.map(model => model.id), ['grok-4.7'])
+  assert.equal(fake.seen[0].url, 'https://cli-chat-proxy.grok.com/v1/models-v2')
+  resetGrokFetch()
+  setProxyDependencies({})
+})
+
+test('an injected fetch is used as-is, so tests and callers stay in control', async () => {
+  resetGrokFetch()
+  setProxyDependencies({ hostProxies: async () => false })
+  let used = false
   const models = await fetchLiveCatalog('token', {
     env: { GROK_PROXY: 'http://127.0.0.1:10808' },
-    fetch: async () => ({
-      ok: true,
-      status: 200,
-      headers: { get: () => null },
-      arrayBuffer: async () => Buffer.from(JSON.stringify({ data: [{ id: 'grok-4.7' }] })),
-    }),
+    fetch: async () => {
+      used = true
+      return {
+        ok: true,
+        status: 200,
+        headers: { get: () => null },
+        arrayBuffer: async () => Buffer.from(JSON.stringify({ data: [{ id: 'grok-4.6' }] })),
+      }
+    },
   })
-  assert.deepEqual(models.map(model => model.id), ['grok-4.7'])
-  assert.equal(fake.state.proxyAgents.length, 1)
-  resetApiRouting()
-  setRoutingDependencies({})
+  assert.equal(used, true)
+  assert.deepEqual(models.map(model => model.id), ['grok-4.6'])
+  setProxyDependencies({})
+})
+
+test('the host child-environment overlay is returned only when it names a proxy', async () => {
+  setProxyDependencies({
+    hostProxyEnv: () => ({ https_proxy: 'http://127.0.0.1:10808', NODE_USE_ENV_PROXY: '1' }),
+  })
+  const overlay = await hostProxyEnvironment()
+  assert.equal(overlay.https_proxy, 'http://127.0.0.1:10808')
+  setProxyDependencies({ hostProxyEnv: () => ({}) })
+  assert.equal(await hostProxyEnvironment(), undefined)
+  setProxyDependencies({})
 })

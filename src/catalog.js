@@ -1,7 +1,7 @@
 import { CATALOG_TIMEOUT_MS, FALLBACK_MODEL_IDS, IMAGE_INPUT_MODEL_IDS, MODELS_V2_URL, PROVIDER_ID, PROXY_BASE_URL } from './constants.js'
 import { buildProxyHeaders } from './headers.js'
 import { readResponseJson } from './http-json.js'
-import { ensureApiRouting } from './proxy.js'
+import { grokFetch } from './proxy.js'
 
 const REASONING_LEVELS = Object.freeze(['low', 'medium', 'high', 'xhigh'])
 
@@ -151,10 +151,9 @@ export function toLlmModels(models) {
 }
 
 export async function fetchLiveCatalog(accessToken, options = {}) {
-  // The tunnel is installed as a per-origin route; a host that already routes
-  // this origin is left alone.
-  await ensureApiRouting(options.env)
-  const fetchImpl = options.fetch ?? globalThis.fetch
+  // Our own fetch when a tunnel is configured; otherwise the host's fetch,
+  // which already carries its proxy policy and response decoding.
+  const fetchImpl = options.fetch ?? await grokFetch(options.env) ?? globalThis.fetch
   const signal = options.signal ?? AbortSignal.timeout(options.timeoutMs ?? CATALOG_TIMEOUT_MS)
   const response = await fetchImpl(MODELS_V2_URL, {
     method: 'GET',

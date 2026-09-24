@@ -16,6 +16,8 @@ const grokSession = (token, expiresAtMs) => ({
   maskedAccount: 'u***@example.com',
 })
 
+const afterSpawn = () => new Promise(resolve => setImmediate(resolve))
+
 function fakeChild() {
   const child = new EventEmitter()
   child.killed = false
@@ -43,6 +45,7 @@ test('spawnGrokRefresh runs `grok models` and resolves on exit', async () => {
     env: { DSH_GROK_BIN: '/opt/grok' },
     exists: () => true,
   })
+  await afterSpawn()
   child.emit('exit', 0)
   const result = await pending
   assert.equal(calls.length, 1)
@@ -61,6 +64,7 @@ test('spawnGrokRefresh treats a non-zero exit as done, not as failure', async ()
     env: { DSH_GROK_BIN: '/opt/grok' },
     exists: () => true,
   })
+  await afterSpawn()
   child.emit('exit', 1)
   assert.deepEqual(await pending, { ok: true, code: 1 })
 })
@@ -84,6 +88,7 @@ test('spawnGrokRefresh surfaces a spawn error', async () => {
     env: { DSH_GROK_BIN: '/opt/grok' },
     exists: () => true,
   })
+  await afterSpawn()
   child.emit('error', new Error('ENOENT'))
   await assert.rejects(pending, /Could not run grok CLI/)
 })

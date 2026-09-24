@@ -1,35 +1,36 @@
 /**
- * Tunnel for this plugin's own Grok traffic.
+ * Tunnel for this plugin's own Grok requests — and nothing else.
  *
- * `cli-chat-proxy.grok.com` is not reachable from every network, while the
- * harness itself must keep talking to its other providers directly: a global
- * `http_proxy` would couple every provider to this tunnel and cost the user
- * DeepSeek, packy-code and plugin installation the moment it goes down.
+ * Two approaches that look simpler both break the host:
  *
- * The route is therefore installed as a per-origin dispatcher: this plugin's
- * Grok host rides the configured tunnel, every other origin keeps the direct
- * pool. A host that already routes the Grok origin through its own policy (the
- * harness read standard proxy variables) is left untouched.
+ * - Passing a `ProxyAgent` as `dispatcher` to the global `fetch` fails. The
+ *   fetch Node ships and a separately loaded undici are different majors, and
+ *   the call dies with `invalid onRequestStart` before a byte is sent.
+ * - Replacing the global dispatcher (`setGlobalDispatcher`) so one origin can
+ *   take a tunnel hands every other request to a dispatcher that does not
+ *   decode gzip. Other plugins then fail to parse npm, usage, and search
+ *   responses. That is the host's dispatcher to own, through
+ *   `@deepseek-ai/dsh-http-proxy` and the standard proxy variables.
  *
- * `GROK_PROXY` is the one knob; `GROK_API_PROXY` overrides it for these
- * requests, `GROK_CLI_PROXY` for the spawned CLI.
+ * So when `GROK_PROXY` (or `GROK_API_PROXY`) names an http(s) tunnel and the
+ * host does not already proxy the Grok origin, only this plugin's requests use
+ * the host undici's own `fetch` bound to a `ProxyAgent`. Everyone else keeps
+ * the global fetch. The `grok` CLI gets the same tunnel in its own environment
+ * only; a host proxy policy (`proxyEnvironmentForChild`) wins over it.
  */
 
 import { existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
-/** Origins this plugin owns: everything else must keep its own route. */
-export const GROK_API_HOSTS = Object.freeze(['cli-chat-proxy.grok.com'])
-
 const HTTP_PROXY_PATTERN = /^https?:\/\//iu
-/** Package that already holds the host's proxy policy, when it is installed. */
 const HOST_PROXY_PACKAGE = '@deepseek-ai/dsh-http-proxy'
+const GROK_ORIGIN = 'https://cli-chat-proxy.grok.com/'
 
-/** Installed routing: one per configured tunnel. */
-let installed
-/** Tests substitute the undici surface and the host-policy probe. */
-const dependencies = { undici: undefined, hostProxies: undefined }
+/** One bound fetch per tunnel URL. Never a process-wide dispatcher. */
+let cached
+/** Tests substitute the undici module and the host-policy answers. */
+const dependencies = { undici: undefined, hostProxies: undefined, hostProxyEnv: undefined }
 
 /** Resolve the proxy URL for this plugin's Grok HTTP calls. */
 export function apiProxyUrl(env = process.env) {
@@ -40,21 +41,10 @@ export function apiProxyUrl(env = process.env) {
   return undefined
 }
 
-function hostOf(origin) {
-  try {
-    return new URL(origin).hostname
-  } catch {
-    return ''
-  }
-}
-
 /**
- * Locate the host installation's undici by walking up from the running entry
- * point — the same peer-resolution walk the plugin uses elsewhere. The copy a
- * plain `import('undici')` finds from a profile can be another installation's
- * (and a different major than the one backing global fetch), so the host's own
- * copy is preferred and the bare specifier is only a fallback.
- * @returns a module namespace, or undefined.
+ * The host installation's undici, found by walking up from the running entry
+ * point. Its `fetch` and `ProxyAgent` belong together; the global fetch does not.
+ * @returns the module namespace, or undefined.
  */
 async function loadHostUndici() {
   let dir = dirname(process.argv[1] ?? '')
@@ -76,81 +66,87 @@ async function loadHostUndici() {
   }
 }
 
-/** Whether the harness already sends the Grok origin through a proxy. */
-async function hostProxiesGrok() {
+async function hostProxyModule() {
+  try {
+    return await import(HOST_PROXY_PACKAGE)
+  } catch {
+    return undefined
+  }
+}
+
+/** Whether the host's own proxy policy already sends the Grok origin through a tunnel. */
+async function hostAlreadyProxiesGrok() {
   if (typeof dependencies.hostProxies === 'function') return dependencies.hostProxies()
+  const mod = await hostProxyModule()
   try {
-    const mod = await import(HOST_PROXY_PACKAGE)
-    const route = mod?.proxyRouteFor?.(`https://${GROK_API_HOSTS[0]}/`)
-    return route?.proxied === true
+    return mod?.proxyRouteFor?.(GROK_ORIGIN)?.proxied === true
   } catch {
     return false
   }
 }
 
 /**
- * Route the Grok API through the configured tunnel.
+ * Environment overlay the host wants spawned children to inherit, when it
+ * actually names a proxy. Empty when the host has no proxy policy.
+ * @returns the overlay, or undefined.
+ */
+const CHILD_PROXY_NAMES = ['http_proxy', 'https_proxy', 'all_proxy', 'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY']
+
+function proxyOverlay(value) {
+  if (!value || typeof value !== 'object') return undefined
+  return CHILD_PROXY_NAMES.some(name => typeof value[name] === 'string' && value[name].trim())
+    ? value
+    : undefined
+}
+
+export async function hostProxyEnvironment() {
+  if (typeof dependencies.hostProxyEnv === 'function') return proxyOverlay(dependencies.hostProxyEnv())
+  const mod = await hostProxyModule()
+  try {
+    const overlay = typeof mod?.proxyEnvironmentForChild === 'function'
+      ? mod.proxyEnvironmentForChild()
+      : undefined
+    return proxyOverlay(overlay)
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Fetch for one Grok request, or undefined to use the global fetch.
  *
- * Idempotent and cached; the routing stays installed for the plugin's lifetime
- * and {@link resetApiRouting} puts the previous dispatcher back.
+ * Undefined is the right answer when no tunnel is configured, the URL is not an
+ * http(s) proxy (undici's ProxyAgent speaks CONNECT only; the CLI still accepts
+ * SOCKS), the host already routes this origin, or undici cannot be loaded. A
+ * caller then keeps the host's dispatcher and its decompression.
  * @param env - environment to read the proxy URL from.
- * @returns `'plugin'` when this module installed the route, `'host'` when the
- *   harness already routes it, `'direct'` when no usable tunnel is configured.
+ * @returns a fetch-compatible function bound to the tunnel.
  */
-export async function ensureApiRouting(env = process.env) {
+export async function grokFetch(env = process.env) {
   const url = apiProxyUrl(env)
-  // undici's ProxyAgent speaks HTTP CONNECT only; a SOCKS URL cannot be
-  // expressed here, so the request keeps its direct route. The CLI does support
-  // SOCKS, which is why `cliProxyEnv` passes it through.
-  if (!url || !HTTP_PROXY_PATTERN.test(url)) return 'direct'
-  if (installed?.url === url) return 'plugin'
-  if (await hostProxiesGrok()) return 'host'
+  if (!url || !HTTP_PROXY_PATTERN.test(url)) return undefined
+  if (await hostAlreadyProxiesGrok()) return undefined
+  if (cached?.url === url) return cached.fetch
   const undici = dependencies.undici ?? await loadHostUndici()
-  const { Agent, Pool, ProxyAgent, getGlobalDispatcher, setGlobalDispatcher } = undici ?? {}
-  if (typeof Agent !== 'function' || typeof setGlobalDispatcher !== 'function') return 'direct'
+  if (typeof undici?.fetch !== 'function' || typeof undici?.ProxyAgent !== 'function') return undefined
   try {
-    const tunnel = new ProxyAgent(url)
-    const routing = new Agent({
-      factory(origin, options) {
-        return GROK_API_HOSTS.includes(hostOf(origin)) ? tunnel : new Pool(origin, options)
-      },
-    })
-    const previous = typeof getGlobalDispatcher === 'function' ? getGlobalDispatcher() : undefined
-    setGlobalDispatcher(routing)
-    installed = {
-      url,
-      dispatcher: routing,
-      restore: () => {
-        if (previous !== undefined) setGlobalDispatcher(previous)
-        installed = undefined
-      },
-    }
-    return 'plugin'
+    const dispatcher = new undici.ProxyAgent(url)
+    const fetchImpl = (input, init) => undici.fetch(input, { ...init, dispatcher })
+    cached = { url, fetch: fetchImpl }
+    return fetchImpl
   } catch {
-    // Unusable proxy URL or an undici surface without these classes: the
-    // request keeps its direct route and reports its own failure.
-    return 'direct'
+    return undefined
   }
 }
 
-/**
- * Undo the installed route, if this module installed one.
- * @returns the previous dispatcher was restored.
- */
-export function resetApiRouting() {
-  const current = installed
-  installed = undefined
-  if (!current) return false
-  try {
-    current.restore()
-    return true
-  } catch {
-    return false
-  }
+/** Drop the cached fetch (tests, and a proxy URL that changed). */
+export function resetGrokFetch() {
+  cached = undefined
 }
 
-/** Test seam: substitute undici classes or the host-policy probe. */
-export function setRoutingDependencies(next = {}) {
+/** Test seam. */
+export function setProxyDependencies(next = {}) {
   dependencies.undici = next.undici
   dependencies.hostProxies = next.hostProxies
+  dependencies.hostProxyEnv = next.hostProxyEnv
 }

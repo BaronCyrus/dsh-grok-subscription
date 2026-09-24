@@ -209,7 +209,7 @@ npx -y @deepseek-ai/dsh@0.1.5-rc.2 plugin --profile web remove dsh-grok-subscrip
 
 - **`dsh` 无法识别**：官方 npm 方式本来就不会创建全局 `dsh` 命令，请使用上面的完整 `npx -y @deepseek-ai/dsh@0.1.5-rc.2 ...` 命令；
 - **模型列表是空的**：未登录时插件不暴露任何模型。先完成登录，再点 **从 Grok CLI 拉取**；
-- **登录不弹浏览器 / 聊天报 `fetch failed` / 用量「Billing request timed out」**：这三件事都指向同一个原因——`accounts.x.ai` 与 `cli-chat-proxy.grok.com` 在部分网络里必须走隧道。在 `~/.dsh/.env` 写一行 `GROK_PROXY=http://127.0.0.1:10808` 即可：它只作用于**本插件的 Grok 请求**（模型目录、用量、聊天）和它启动的 **`grok` CLI**（登录、续期），DSH 自身与其他 provider 仍走直连——把 `http_proxy` 写在这里会让所有 provider 一起走隧道，隧道一停就全连不上。写好后重启客户端；登录链接会交给系统浏览器打开，面板里同时显示一次性验证码与可点链接。环境里已有的标准代理变量同样会被 CLI 继承；
+- **登录不弹浏览器 / 聊天报 `fetch failed` / 用量「Billing request timed out」**：这三件事都指向同一个原因——`accounts.x.ai` 与 `cli-chat-proxy.grok.com` 在部分网络里必须走隧道。在 `~/.dsh/.env` 写一行 `GROK_PROXY=http://127.0.0.1:10808` 即可：它只作用于**本插件自己的 Grok 请求**（走宿主 undici 的 fetch，不替换进程的全局调度器）和它启动的 **`grok` CLI**。其他插件、DSH 自身和其他 provider 继续用宿主原来的 `fetch`。想让整个 Harness 走代理时，用标准的 `https_proxy`（可写在 `~/.dsh/.env`，不要写进项目目录），宿主的 `@deepseek-ai/dsh-http-proxy` 会接管，本插件不再另加隧道。写好后重启客户端；登录链接会交给系统浏览器打开，面板里同时显示一次性验证码与可点链接。
 - **升级后界面没变化**：插件会继续运行旧的 `lib/`，请重新安装插件并重启 `dsh web`，然后硬刷新（Ctrl+Shift+R）；
 - **提示 `auth.json` 权限不正确**：按上面的 `chmod 600` 处理；插件拒绝读取符号链接或组/其他用户可读的文件；
 - **出现「没有回复」**：请升级到 `1.0.1` 或更高版本。`1.0.0` 存在一个缺陷：工具调用轮次会因流片段无法无损序列化而整轮中止，界面上完全没有回复。
