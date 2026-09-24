@@ -16,7 +16,6 @@ import {
 } from './constants.js'
 import { reasoningInfoOf, supportsImageInput, toLlmModels, toPiModels } from './catalog.js'
 import { buildProxyHeaders, fingerprintHeaders } from './headers.js'
-import { grokFetch } from './proxy.js'
 
 function withImportTimeout(promise, ms, message) {
   let timer
@@ -466,7 +465,6 @@ function jsonSafeChunk(value) {
 }
 
 async function* streamResponsesUnsafe(options, token) {
-  const fetchImpl = await grokFetch() ?? globalThis.fetch
   const headers = {
     Accept: 'text/event-stream',
     'Content-Type': 'application/json',
@@ -494,7 +492,7 @@ async function* streamResponsesUnsafe(options, token) {
   if (tools.length) body.tools = tools
   if (options.reasoningEffort) body.reasoning = { effort: options.reasoningEffort }
 
-  const response = await fetchImpl(RESPONSES_URL, {
+  const response = await fetch(RESPONSES_URL, {
     method: 'POST',
     headers,
     body: JSON.stringify(body),
@@ -884,10 +882,9 @@ function buildAuthConfig() {
  * pi-ai hard-codes that include for provider "xai" only; grok-build talks to the
  * same family of reasoning models and needs the ciphertext for multi-turn replay.
  */
-function withEncryptedReasoningInclude(api, fetchImpl) {
+function withEncryptedReasoningInclude(api) {
   const inject = options => ({
     ...options,
-    ...(typeof fetchImpl === 'function' ? { fetch: fetchImpl } : {}),
     samplingParams: {
       ...options?.samplingParams,
       include: ['reasoning.encrypted_content'],
@@ -961,7 +958,7 @@ export async function createGrokBuildAdapter(session, options = {}) {
   }
   // pi-ai only auto-sets include for provider id "xai"; grok-build needs the same
   // encrypted reasoning replay so turn 2+ keeps visible assistant text.
-  responsesApi = withEncryptedReasoningInclude(responsesApi, await grokFetch())
+  responsesApi = withEncryptedReasoningInclude(responsesApi)
 
   const store = createStore(session)
   const authModels = piAi.createModels({

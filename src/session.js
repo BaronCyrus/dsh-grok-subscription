@@ -13,7 +13,6 @@ import { authJsonPath, grokHome, publicSessionView, readGrokAuthSession } from '
 import { loadCatalog as defaultLoadCatalog } from './catalog.js'
 import { fetchBillingUsage as defaultFetchBillingUsage, unavailableUsage } from './usage.js'
 import { optionalImport } from './adapter.js'
-import { hostProxyEnvironment } from './proxy.js'
 
 export function resolveGrokBin(env = process.env, exists = existsSync) {
   if (typeof env.DSH_GROK_BIN === 'string' && env.DSH_GROK_BIN.trim()) return env.DSH_GROK_BIN.trim()
@@ -27,69 +26,6 @@ export function grokCliAvailable(env = process.env, exists = existsSync) {
   if (bin.includes('/') || bin.includes('\\')) return exists(bin)
   const delimiter = process.platform === 'win32' ? ';' : ':'
   return String(env.PATH ?? '').split(delimiter).some(dir => dir && exists(join(dir, bin)))
-}
-
-/** Standard proxy variables that make the *host* route every request through a tunnel. */
-const STANDARD_PROXY_NAMES = [
-  'http_proxy', 'https_proxy', 'all_proxy', 'no_proxy',
-  'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY',
-]
-
-/**
- * Environment for a spawned grok CLI.
- *
- * The desktop host inherits no shell proxy, so the CLI cannot reach the x.ai
- * sign-in hosts on a network that needs a tunnel — but putting `http_proxy` in
- * DSH's own environment would route every provider request through that tunnel
- * and break them all whenever it is down. `GROK_CLI_PROXY` (or the shared
- * `GROK_PROXY`) is therefore applied to this child alone. A host proxy policy
- * already materialized into the environment (what `@deepseek-ai/dsh-http-proxy`
- * publishes for every child) keeps winning, so this never calls
- * `setGlobalDispatcher` and never rewrites the host's own variables.
- * @param env - the host environment to start from.
- * @returns the child environment.
- */
-export function cliProxyEnv(env = process.env) {
-  const base = env ?? process.env
-  const declared = STANDARD_PROXY_NAMES.some(name => typeof base[name] === 'string' && base[name].trim() !== '')
-  if (declared) return base
-  const named = [base.GROK_CLI_PROXY, base.GROK_PROXY]
-    .find(value => typeof value === 'string' && value.trim() !== '')
-  const proxy = typeof named === 'string' ? named.trim() : ''
-  if (!proxy) return base
-  const bypass = typeof base.GROK_CLI_NO_PROXY === 'string' && base.GROK_CLI_NO_PROXY.trim()
-    ? base.GROK_CLI_NO_PROXY.trim()
-    : 'localhost,127.0.0.1,::1'
-  // A SOCKS URL is only meaningful as `all_proxy`; reqwest-family clients honor
-  // it for every scheme there, while a bogus http_proxy would be ignored.
-  const httpish = /^https?:\/\//iu.test(proxy)
-  return {
-    ...base,
-    ...(httpish ? { http_proxy: proxy, https_proxy: proxy } : {}),
-    all_proxy: proxy,
-    no_proxy: bypass,
-  }
-}
-
-/**
- * Environment for one grok CLI child.
- *
- * The host's proxy policy wins when it has one (`proxyEnvironmentForChild` —
- * the same overlay `@deepseek-ai/dsh-http-proxy` gives every other child).
- * Otherwise {@link cliProxyEnv} applies `GROK_PROXY` to this child alone.
- * @param env - the host environment to start from.
- * @returns the child environment.
- */
-export async function resolveCliEnv(env = process.env) {
-  const base = env ?? process.env
-  const overlay = await hostProxyEnvironment()
-  if (!overlay) return cliProxyEnv(base)
-  const next = { ...base }
-  for (const [key, value] of Object.entries(overlay)) {
-    if (value === undefined) delete next[key]
-    else next[key] = value
-  }
-  return next
 }
 
 /**
@@ -154,13 +90,12 @@ export async function spawnGrokLogin(options = {}) {
     ? options.startTimeoutMs
     : LOGIN_START_TIMEOUT_MS
   const openUrl = options.openUrl ?? (url => openExternal(url, { spawn: options.openSpawn }))
-  const childEnv = await resolveCliEnv(options.env)
   return new Promise((resolve, reject) => {
     let child
     try {
       child = spawnFn(bin, args, {
         stdio: options.stdio ?? ['ignore', 'pipe', 'pipe'],
-        env: childEnv,
+        env: options.env ?? process.env,
       })
     } catch (error) {
       reject(new Error(`Could not start grok CLI (${bin})`, { cause: error }))
@@ -244,13 +179,12 @@ export async function spawnGrokRefresh(options = {}) {
   const timeoutMs = typeof options.timeoutMs === 'number' && options.timeoutMs > 0
     ? options.timeoutMs
     : CLI_REFRESH_TIMEOUT_MS
-  const childEnv = await resolveCliEnv(options.env)
   return new Promise((resolve, reject) => {
     let child
     try {
       child = spawnFn(bin, ['models'], {
         stdio: options.stdio ?? 'ignore',
-        env: childEnv,
+        env: options.env ?? process.env,
       })
     } catch (error) {
       reject(new Error(`Could not start grok CLI (${bin})`, { cause: error }))

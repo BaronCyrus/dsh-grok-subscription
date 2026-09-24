@@ -2,9 +2,6 @@ import { build } from 'esbuild'
 
 const external = [
   '@deepseek-ai/*', '@earendil-works/*', 'react', 'react-dom', 'react/jsx-runtime',
-  // The host installation owns undici; the plugin only borrows its ProxyAgent
-  // for the optional Grok tunnel.
-  'undici',
 ]
 
 await build({

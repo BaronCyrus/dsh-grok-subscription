@@ -1,7 +1,6 @@
 import { BILLING_CREDITS_URL, USAGE_TIMEOUT_MS } from './constants.js'
 import { buildProxyHeaders } from './headers.js'
 import { readResponseText } from './http-json.js'
-import { grokFetch } from './proxy.js'
 
 const USAGE_SOURCE = 'billing-credits-undocumented'
 const SHANGHAI_TZ = 'Asia/Shanghai'
@@ -252,8 +251,7 @@ async function fetchBillingUsageOnce(accessToken, options = {}) {
   let response
   try {
     const signal = options.signal ?? AbortSignal.timeout(options.timeoutMs ?? USAGE_TIMEOUT_MS)
-    const tunnelFetch = options.fetch ? undefined : await grokFetch(options.env)
-    response = await (tunnelFetch ?? fetchImpl)(BILLING_CREDITS_URL, {
+    response = await fetchImpl(BILLING_CREDITS_URL, {
       method: 'GET',
       headers: {
         Accept: 'application/json',

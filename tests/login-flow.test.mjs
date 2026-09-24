@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
-import { createSessionService, cliProxyEnv, openExternal, spawnGrokLogin } from '../src/session.js'
+import { createSessionService, openExternal, spawnGrokLogin } from '../src/session.js'
 import { createRpcHandler } from '../src/rpc.js'
 
 const NOW = Date.parse('2026-09-22T08:00:00Z')
@@ -30,55 +30,6 @@ function fakeLoginChild() {
 }
 
 const binOptions = { env: { DSH_GROK_BIN: '/opt/grok' }, exists: () => true }
-
-// -------------------------------------------------------- CLI proxy (host-safe)
-
-test('GROK_CLI_PROXY reaches the CLI without touching the host environment', () => {
-  const base = { PATH: '/usr/bin', GROK_CLI_PROXY: 'http://127.0.0.1:10808' }
-  const env = cliProxyEnv(base)
-  assert.equal(env.http_proxy, 'http://127.0.0.1:10808')
-  assert.equal(env.https_proxy, 'http://127.0.0.1:10808')
-  assert.equal(env.all_proxy, 'http://127.0.0.1:10808')
-  assert.equal(env.no_proxy, 'localhost,127.0.0.1,::1')
-  assert.equal(base.http_proxy, undefined, 'the host environment must not be mutated')
-})
-
-test('a SOCKS proxy is declared only where it is meaningful', () => {
-  const env = cliProxyEnv({ GROK_CLI_PROXY: 'socks5h://127.0.0.1:10808' })
-  assert.equal(env.all_proxy, 'socks5h://127.0.0.1:10808')
-  assert.equal(env.http_proxy, undefined)
-})
-
-test('GROK_CLI_NO_PROXY overrides the default bypass list', () => {
-  const env = cliProxyEnv({
-    GROK_CLI_PROXY: 'http://127.0.0.1:10808',
-    GROK_CLI_NO_PROXY: 'localhost,cli-chat-proxy.grok.com',
-  })
-  assert.equal(env.no_proxy, 'localhost,cli-chat-proxy.grok.com')
-})
-
-test('explicit standard proxy variables win over GROK_CLI_PROXY', () => {
-  const base = { http_proxy: 'http://corp.example:8080', GROK_CLI_PROXY: 'http://127.0.0.1:10808' }
-  assert.equal(cliProxyEnv(base), base)
-})
-
-test('no proxy configuration leaves the environment untouched', () => {
-  const base = { PATH: '/usr/bin' }
-  assert.equal(cliProxyEnv(base), base)
-})
-
-test('the login spawn receives the derived proxy environment', async () => {
-  const child = fakeLoginChild()
-  let spawnedEnv
-  const pending = spawnGrokLogin({
-    env: { PATH: '/usr/bin', GROK_CLI_PROXY: 'http://127.0.0.1:10808' },
-    spawn: (bin, args, options) => { spawnedEnv = options.env; return child },
-    openUrl: () => {},
-    startTimeoutMs: 20,
-  })
-  await pending
-  assert.equal(spawnedEnv.http_proxy, 'http://127.0.0.1:10808')
-})
 
 // ------------------------------------------------------------------ the link
 
