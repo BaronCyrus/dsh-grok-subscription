@@ -16,6 +16,7 @@ import {
 } from './constants.js'
 import { reasoningInfoOf, supportsImageInput, toLlmModels, toPiModels } from './catalog.js'
 import { buildProxyHeaders, fingerprintHeaders } from './headers.js'
+import { ensureApiRouting } from './proxy.js'
 
 function withImportTimeout(promise, ms, message) {
   let timer
@@ -465,6 +466,8 @@ function jsonSafeChunk(value) {
 }
 
 async function* streamResponsesUnsafe(options, token) {
+  // Streaming reaches the same origin as the catalog, so it needs the tunnel too.
+  await ensureApiRouting()
   const headers = {
     Accept: 'text/event-stream',
     'Content-Type': 'application/json',
@@ -958,6 +961,7 @@ export async function createGrokBuildAdapter(session, options = {}) {
   }
   // pi-ai only auto-sets include for provider id "xai"; grok-build needs the same
   // encrypted reasoning replay so turn 2+ keeps visible assistant text.
+  await ensureApiRouting()
   responsesApi = withEncryptedReasoningInclude(responsesApi)
 
   const store = createStore(session)

@@ -31,7 +31,7 @@
    dsh plugin --profile web add BaronCyrus/dsh-grok-subscription
    ```
 
-2. **登录订阅**：打开 **设置 → Grok 订阅**，点击 **CLI 登录** 或 **设备码登录**，在启动 DSH 的终端里完成官方提示。已经自己跑过 `grok login` 的话，直接点 **从 Grok CLI 拉取** 即可，不需要粘贴任何 token。
+2. **登录订阅**：打开 **设置 → Grok 订阅**，点击 **CLI 登录** 或 **设备码登录**。插件会运行官方 `grok login`，把 CLI 打印的登录链接交给浏览器，并在面板里显示一次性验证码与可点的链接；授权完成后自动同步。已经自己跑过 `grok login` 的话，直接点 **从 Grok CLI 拉取** 即可，不需要粘贴任何 token。
 3. **开始使用**：在模型选择器中选择 Grok 4.7 等模型。输入框旁的圆形徽章显示每周剩余额度，模型菜单里有推理档位。
 
 安装或升级后需要重启 `dsh web`，否则会继续运行旧的 `lib/`。
@@ -209,6 +209,7 @@ npx -y @deepseek-ai/dsh@0.1.5-rc.2 plugin --profile web remove dsh-grok-subscrip
 
 - **`dsh` 无法识别**：官方 npm 方式本来就不会创建全局 `dsh` 命令，请使用上面的完整 `npx -y @deepseek-ai/dsh@0.1.5-rc.2 ...` 命令；
 - **模型列表是空的**：未登录时插件不暴露任何模型。先完成登录，再点 **从 Grok CLI 拉取**；
+- **登录不弹浏览器 / 聊天报 `fetch failed` / 用量「Billing request timed out」**：这三件事都指向同一个原因——`accounts.x.ai` 与 `cli-chat-proxy.grok.com` 在部分网络里必须走隧道。在 `~/.dsh/.env` 写一行 `GROK_PROXY=http://127.0.0.1:10808` 即可：它只作用于**本插件的 Grok 请求**（模型目录、用量、聊天）和它启动的 **`grok` CLI**（登录、续期），DSH 自身与其他 provider 仍走直连——把 `http_proxy` 写在这里会让所有 provider 一起走隧道，隧道一停就全连不上。写好后重启客户端；登录链接会交给系统浏览器打开，面板里同时显示一次性验证码与可点链接。环境里已有的标准代理变量同样会被 CLI 继承；
 - **升级后界面没变化**：插件会继续运行旧的 `lib/`，请重新安装插件并重启 `dsh web`，然后硬刷新（Ctrl+Shift+R）；
 - **提示 `auth.json` 权限不正确**：按上面的 `chmod 600` 处理；插件拒绝读取符号链接或组/其他用户可读的文件；
 - **出现「没有回复」**：请升级到 `1.0.1` 或更高版本。`1.0.0` 存在一个缺陷：工具调用轮次会因流片段无法无损序列化而整轮中止，界面上完全没有回复。

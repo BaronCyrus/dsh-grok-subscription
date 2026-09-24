@@ -5,6 +5,7 @@ import {
   CLI_REFRESH_TIMEOUT_MS,
   CREDENTIAL_REF_NAME,
   CREDENTIALS_IO_TIMEOUT_MS,
+  LOGIN_START_TIMEOUT_MS,
   STORE_TOKEN_TIMEOUT_MS,
   TOKEN_EXPIRY_SKEW_MS,
 } from './constants.js'
@@ -27,20 +28,178 @@ export function grokCliAvailable(env = process.env, exists = existsSync) {
   return String(env.PATH ?? '').split(delimiter).some(dir => dir && exists(join(dir, bin)))
 }
 
+/** Standard proxy variables that make the *host* route every request through a tunnel. */
+const STANDARD_PROXY_NAMES = [
+  'http_proxy', 'https_proxy', 'all_proxy', 'no_proxy',
+  'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY',
+]
+
+/**
+ * Environment for a spawned grok CLI.
+ *
+ * The desktop host inherits no shell proxy, so the CLI cannot reach the x.ai
+ * sign-in hosts on a network that needs a tunnel — but putting `http_proxy` in
+ * DSH's own environment would route every provider request through that tunnel
+ * and break them all whenever it is down. `GROK_CLI_PROXY` (or the shared
+ * `GROK_PROXY`) is therefore applied to this child alone. Explicit standard
+ * variables, when the surrounding environment already carries them, keep winning.
+ * @param env - the host environment to start from.
+ * @returns the child environment.
+ */
+export function cliProxyEnv(env = process.env) {
+  const base = env ?? process.env
+  const declared = STANDARD_PROXY_NAMES.some(name => typeof base[name] === 'string' && base[name].trim() !== '')
+  if (declared) return base
+  const named = [base.GROK_CLI_PROXY, base.GROK_PROXY]
+    .find(value => typeof value === 'string' && value.trim() !== '')
+  const proxy = typeof named === 'string' ? named.trim() : ''
+  if (!proxy) return base
+  const bypass = typeof base.GROK_CLI_NO_PROXY === 'string' && base.GROK_CLI_NO_PROXY.trim()
+    ? base.GROK_CLI_NO_PROXY.trim()
+    : 'localhost,127.0.0.1,::1'
+  // A SOCKS URL is only meaningful as `all_proxy`; reqwest-family clients honor
+  // it for every scheme there, while a bogus http_proxy would be ignored.
+  const httpish = /^https?:\/\//iu.test(proxy)
+  return {
+    ...base,
+    ...(httpish ? { http_proxy: proxy, https_proxy: proxy } : {}),
+    all_proxy: proxy,
+    no_proxy: bypass,
+  }
+}
+
+/**
+ * Hand a URL to the user's browser. The desktop host owns no terminal, so the
+ * CLI cannot deliver its sign-in link by itself: without a TTY `grok login`
+ * prints the URL to stderr and waits, and inherited stderr goes nowhere.
+ * @param url - absolute http(s) URL to open.
+ * @param options - injectable spawn and platform, for tests.
+ * @returns true when the platform opener exited cleanly.
+ */
+export function openExternal(url, options = {}) {
+  const spawnFn = options.spawn ?? spawn
+  const platform = options.platform ?? process.platform
+  const [command, args] = platform === 'darwin'
+    ? ['open', [url]]
+    : platform === 'win32'
+      ? ['cmd', ['/c', 'start', '', url]]
+      : ['xdg-open', [url]]
+  return new Promise(resolve => {
+    let child
+    try {
+      child = spawnFn(command, args, { stdio: 'ignore', detached: false })
+    } catch {
+      resolve(false)
+      return
+    }
+    let settled = false
+    const finish = value => {
+      if (settled) return
+      settled = true
+      resolve(value)
+    }
+    child.on?.('error', () => finish(false))
+    child.on?.('exit', code => finish(code === 0))
+    // Never hold the host open for a browser launcher.
+    child.unref?.()
+  })
+}
+
+/** First http(s) URL in the CLI's sign-in output. */
+const LOGIN_URL_PATTERN = /https?:\/\/[^\s<>"'`\\]+/u
+/** Device code the CLI prints beside that URL (`XXXX-XXXX`). */
+const DEVICE_CODE_PATTERN = /\b([A-Z0-9]{4}-[A-Z0-9]{4})\b/u
+
+/**
+ * Start `grok login` and hand back the sign-in URL it prints.
+ *
+ * Without a TTY the CLI cannot open a browser itself: it prints "open this URL
+ * in your browser" plus a device code to stderr and waits (its own budget is
+ * minutes). This reads that stream, opens the link for the user, and resolves as
+ * soon as the link is known — the child stays alive so the caller can sync the
+ * session when authorization completes. A CLI that inherits stdio (no pipes)
+ * keeps the plain "resolve on exit" behaviour.
+ * @param options - env/bin overrides, injectable spawn/openUrl, start timeout.
+ * @returns `{ ok, pending, loginUrl?, userCode?, child?, warning? }`.
+ */
 export function spawnGrokLogin(options = {}) {
   const spawnFn = options.spawn ?? spawn
   const bin = resolveGrokBin(options.env, options.exists)
   const args = options.device ? ['login', '--device-auth'] : ['login']
+  const startTimeoutMs = typeof options.startTimeoutMs === 'number' && options.startTimeoutMs > 0
+    ? options.startTimeoutMs
+    : LOGIN_START_TIMEOUT_MS
+  const openUrl = options.openUrl ?? (url => openExternal(url, { spawn: options.openSpawn }))
   return new Promise((resolve, reject) => {
-    const child = spawnFn(bin, args, {
-      stdio: options.stdio ?? 'inherit',
-      env: options.env ?? process.env,
-    })
+    let child
+    try {
+      child = spawnFn(bin, args, {
+        stdio: options.stdio ?? ['ignore', 'pipe', 'pipe'],
+        env: cliProxyEnv(options.env),
+      })
+    } catch (error) {
+      reject(new Error(`Could not start grok CLI (${bin})`, { cause: error }))
+      return
+    }
+    let settled = false
+    let loginUrl
+    let userCode
+    let buffer = ''
+    let timer
+    const succeed = value => {
+      if (settled) return
+      settled = true
+      if (timer) clearTimeout(timer)
+      resolve(value)
+    }
+    /** First link wins; the code may arrive in the same chunk or a later one. */
+    const scan = text => {
+      if (text) buffer = `${buffer}${text}`.slice(-8192)
+      if (!userCode) {
+        const code = DEVICE_CODE_PATTERN.exec(buffer)
+        if (code) userCode = code[1]
+      }
+      if (loginUrl) return
+      const match = LOGIN_URL_PATTERN.exec(buffer)
+      if (!match) return
+      loginUrl = match[0]
+      try {
+        void openUrl(loginUrl)
+      } catch {
+        // Best effort: the reply still carries the URL for the panel to show.
+      }
+      succeed({ ok: true, pending: true, loginUrl, userCode, child })
+    }
+    const piped = Boolean(child.stdout && child.stderr)
+    if (piped) {
+      child.stdout.on('data', chunk => scan(String(chunk)))
+      child.stderr.on('data', chunk => scan(String(chunk)))
+      timer = setTimeout(() => {
+        // No link yet. Keep the child: a slow link can still open a browser, and
+        // the warning tells the panel (and the user) why nothing appeared.
+        succeed({
+          ok: true,
+          pending: true,
+          loginUrl,
+          userCode,
+          child,
+          warning: `grok login printed no sign-in URL within ${startTimeoutMs}ms`,
+        })
+      }, startTimeoutMs)
+    }
     child.on('error', error => {
+      if (settled) return
+      settled = true
+      if (timer) clearTimeout(timer)
       reject(new Error(`Could not start grok CLI (${bin})`, { cause: error }))
     })
     child.on('exit', (code, signal) => {
-      if (code === 0) resolve({ ok: true, code })
+      // After the link was announced the caller owns completion; a rejected
+      // promise there would surface as a spurious failure.
+      if (settled) return
+      settled = true
+      if (timer) clearTimeout(timer)
+      if (code === 0) resolve({ ok: true, pending: false, loginUrl, userCode, child })
       else reject(new Error(signal ? `grok login terminated by ${signal}` : `grok login exited with code ${code ?? 'unknown'}`))
     })
   })
@@ -65,7 +224,7 @@ export function spawnGrokRefresh(options = {}) {
     try {
       child = spawnFn(bin, ['models'], {
         stdio: options.stdio ?? 'ignore',
-        env: options.env ?? process.env,
+        env: cliProxyEnv(options.env),
       })
     } catch (error) {
       reject(new Error(`Could not start grok CLI (${bin})`, { cause: error }))
@@ -441,8 +600,30 @@ export function createSessionService({
   }
 
   const login = async options => {
-    await spawnGrokLogin(options)
-    return pull()
+    const started = await spawnGrokLogin(options)
+    const extra = {
+      ...(started.loginUrl === undefined ? {} : { loginUrl: started.loginUrl }),
+      ...(started.userCode === undefined ? {} : { userCode: started.userCode }),
+      ...(started.warning === undefined ? {} : { warning: started.warning }),
+    }
+    if (started.pending) {
+      // The CLI keeps waiting for the browser round trip (its own budget is
+      // minutes), so answer now and sync when authorization lands instead of
+      // holding the RPC open — the host caps every handler at a few seconds.
+      started.child?.once?.('exit', code => {
+        if (code !== 0) return
+        scheduleDeferred(() => {
+          void pull().catch(error => {
+            logger?.warn?.(
+              'Grok subscription login sync failed: %s',
+              error instanceof Error ? error.message : 'unknown',
+            )
+          })
+        })
+      })
+      return { ok: true, pending: true, ...extra, ...(await status()) }
+    }
+    return { ...(await pull()), pending: false, ...extra }
   }
 
   const logout = async () => {

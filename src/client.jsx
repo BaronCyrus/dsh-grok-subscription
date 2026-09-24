@@ -9,12 +9,32 @@ import {
   notifyQuickQuota,
 } from './client-composer-quota.jsx'
 
+/**
+ * Services this client entry waits for before it applies.
+ *
+ * Every name must exist on every host the plugin supports: Cordis keeps the
+ * whole entry pending until each one resolves, and an unmet name aborts the
+ * client boot (`<id>: pending (waiting for service: <name>)`).
+ *
+ * `settingsScope` belonged to the 0.1.5 settings implementation and was never
+ * read here — `dsh-client-ui-settings` dropped the service in 0.1.7, where
+ * requiring it wedged this entry. Settings sections register through the
+ * `settings.section` slot, exactly as the in-box sections do.
+ */
 export const inject = [
-  'slots', 'locale', 'connection', 'settingsScope', 'modelDirectories', 'sessions', 'remote',
+  'slots', 'locale', 'connection', 'modelDirectories', 'sessions', 'remote',
 ]
 
 /** Client-side safety net so Settings never sticks on Working… forever. */
 const RPC_CALL_TIMEOUT_MS = 12_000
+/**
+ * Sign-in answers once `grok login` prints its URL, which can take a moment on a
+ * cold or slow network; the browser round trip itself is not awaited.
+ */
+const LOGIN_CALL_TIMEOUT_MS = 30_000
+/** How long the panel keeps polling for the session the CLI is authorizing. */
+const LOGIN_POLL_INTERVAL_MS = 3_000
+const LOGIN_POLL_TIMEOUT_MS = 10 * 60_000
 
 function pickCopy(locale) {
   const language = typeof locale === 'string' ? locale : locale?.language ?? locale?.lang
@@ -43,7 +63,7 @@ async function callRpc(rpc, endpoint, payload = {}, timeoutMs = RPC_CALL_TIMEOUT
     const timeout = new Promise((_, reject) => {
       timer = setTimeout(() => {
         try { controller?.abort() } catch { /* ignore */ }
-        reject(new Error(`Request timed out after ${RPC_CALL_TIMEOUT_MS}ms`))
+        reject(new Error(`Request timed out after ${timeoutMs}ms`))
       }, timeoutMs)
     })
     return unwrap(await Promise.race([call, timeout]))
@@ -294,6 +314,8 @@ export function GrokSubscriptionSection({ rpc, t }) {
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [status, setStatus] = useState(undefined)
+  /** A `grok login` the host started and is watching; the browser round trip owns the rest. */
+  const [loginPending, setLoginPending] = useState(undefined)
   const initialUsageKick = useRef(false)
 
   const applyPartial = (value) => {
@@ -350,8 +372,35 @@ export function GrokSubscriptionSection({ rpc, t }) {
       })
   }
 
+  // While `grok login` waits on the browser, poll the session instead of holding
+  // one long RPC: the host answers as soon as the sign-in URL is known.
+  useEffect(() => {
+    if (!loginPending) return undefined
+    const startedAt = Date.now()
+    const timer = setInterval(() => {
+      if (Date.now() - startedAt > LOGIN_POLL_TIMEOUT_MS) {
+        setLoginPending(undefined)
+        setError(t('loginTimeout'))
+        return
+      }
+      void callRpc(rpc, 'status', {})
+        .then(value => {
+          if (value?.account || value?.catalog || value?.usage) applyPartial(value)
+          if (value?.account?.signedIn !== true) return
+          setLoginPending(undefined)
+          setNotice(t('loginOk'))
+          kickFollowUpRefresh()
+        })
+        .catch(() => {
+          // Keep polling: a transient status failure must not abort a live login.
+        })
+    }, LOGIN_POLL_INTERVAL_MS)
+    return () => clearInterval(timer)
+  }, [loginPending, rpc])
+
   const run = async (endpoint) => {
     const isUsageRefresh = endpoint === 'usage/refresh'
+    const isLogin = endpoint === 'login/cli' || endpoint === 'login/device'
     if (isUsageRefresh) {
       setUsageBusy(true)
     } else {
@@ -361,7 +410,7 @@ export function GrokSubscriptionSection({ rpc, t }) {
     setNotice('')
     let value
     try {
-      value = await callRpc(rpc, endpoint, {})
+      value = await callRpc(rpc, endpoint, {}, isLogin ? LOGIN_CALL_TIMEOUT_MS : RPC_CALL_TIMEOUT_MS)
       if (value?.account || value?.catalog || value?.usage) {
         applyPartial(value)
       } else {
@@ -370,6 +419,10 @@ export function GrokSubscriptionSection({ rpc, t }) {
       if (value?.ok === false && value.error) {
         setNotice('')
         setError(value.error)
+      } else if (value?.pending === true) {
+        // The CLI is waiting on the browser; the panel polls until the session lands.
+        setLoginPending({ url: value.loginUrl, code: value.userCode, warning: value.warning })
+        setNotice('')
       } else if (value?.ok !== false) {
         const successKey = {
           pull: 'pullOk',
@@ -398,6 +451,7 @@ export function GrokSubscriptionSection({ rpc, t }) {
       (endpoint === 'pull' || endpoint === 'login/cli' || endpoint === 'login/device')
       && value?.ok !== false
       && !value?.error
+      && value?.pending !== true
     )
     if (shouldFollowUp) kickFollowUpRefresh()
   }
@@ -422,12 +476,22 @@ export function GrokSubscriptionSection({ rpc, t }) {
           {signedIn && account?.maskedAccount ? <span className="gsAccount">{account.maskedAccount}</span> : null}
         </div>
         <div className="gsActions">
-          <button className="gsBtn gsBtn--primary" type="button" disabled={Boolean(busy)} onClick={() => void run('login/cli')}>{t('loginCli')}</button>
-          <button className="gsBtn" type="button" disabled={Boolean(busy)} onClick={() => void run('login/device')}>{t('loginDevice')}</button>
+          <button className="gsBtn gsBtn--primary" type="button" disabled={Boolean(busy) || Boolean(loginPending)} onClick={() => void run('login/cli')}>{t('loginCli')}</button>
+          <button className="gsBtn" type="button" disabled={Boolean(busy) || Boolean(loginPending)} onClick={() => void run('login/device')}>{t('loginDevice')}</button>
           <button className="gsBtn" type="button" disabled={Boolean(busy)} onClick={() => void run('pull')}>{t('pull')}</button>
           <button className="gsBtn gsBtn--danger" type="button" disabled={Boolean(busy) || !signedIn} onClick={() => void run('logout')}>{t('logout')}</button>
         </div>
         {busy ? <p className="gsStatus gsStatus--busy">{t('busy')}</p> : null}
+        {loginPending ? (
+          <p className="gsStatus gsStatus--busy">
+            {t('loginWaiting')}
+            {loginPending.code ? <> · <code>{loginPending.code}</code></> : null}
+            {loginPending.url
+              ? <> · <a className="gsLink" href={loginPending.url} target="_blank" rel="noreferrer">{t('loginOpenBrowser')}</a></>
+              : null}
+          </p>
+        ) : null}
+        {loginPending?.warning ? <p className="gsStatus gsStatus--warn">{t('loginNoUrl')}</p> : null}
         {notice ? <p className="gsStatus gsStatus--ok">{notice}</p> : null}
         {error ? <p className="gsStatus gsStatus--error">{t('error')}: {error}</p> : null}
         {status?.cliAvailable === false ? <p className="gsStatus gsStatus--warn">{t('cliMissing')}</p> : null}

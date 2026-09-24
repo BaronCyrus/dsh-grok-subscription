@@ -1,5 +1,7 @@
 import { BILLING_CREDITS_URL, USAGE_TIMEOUT_MS } from './constants.js'
 import { buildProxyHeaders } from './headers.js'
+import { readResponseText } from './http-json.js'
+import { ensureApiRouting } from './proxy.js'
 
 const USAGE_SOURCE = 'billing-credits-undocumented'
 const SHANGHAI_TZ = 'Asia/Shanghai'
@@ -249,6 +251,7 @@ async function fetchBillingUsageOnce(accessToken, options = {}) {
   }
   let response
   try {
+    await ensureApiRouting(options.env)
     const signal = options.signal ?? AbortSignal.timeout(options.timeoutMs ?? USAGE_TIMEOUT_MS)
     response = await fetchImpl(BILLING_CREDITS_URL, {
       method: 'GET',
@@ -284,7 +287,7 @@ async function fetchBillingUsageOnce(accessToken, options = {}) {
 
   let text
   try {
-    text = await response.text()
+    text = await readResponseText(response)
   } catch {
     return unavailable('Could not read billing body')
   }

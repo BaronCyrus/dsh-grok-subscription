@@ -38,6 +38,19 @@ function loadPanel() {
 const panel = loadPanel()
 const t = key => `«${key}»`
 
+// Cordis holds a client entry pending until every injected service resolves, so
+// one stale name stops the plugin from ever applying — and 0.1.7 aborts the
+// whole client boot over it (`pending (waiting for service: settingsScope)`).
+// Every entry here must be provided by each supported host.
+test('client inject names only services the supported hosts provide', () => {
+  assert.deepEqual(panel.inject, [
+    'slots', 'locale', 'connection', 'modelDirectories', 'sessions', 'remote',
+  ])
+  // `settingsScope` was removed from dsh-client-ui-settings in 0.1.7 and is
+  // never read by this plugin; requiring it wedges the entry.
+  assert.ok(!panel.inject.includes('settingsScope'))
+})
+
 function render(status) {
   const rpc = { call: async () => ({ ok: true, value: status }) }
   return renderToStaticMarkup(React.createElement(panel.GrokSubscriptionPanel, { rpc, t }))

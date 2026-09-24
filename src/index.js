@@ -8,6 +8,7 @@ import {
   createGrokBuildAdapterSync,
   optionalImport,
 } from './adapter.js'
+import { ensureApiRouting, resetApiRouting } from './proxy.js'
 
 export const name = CORDIS_ID
 /**
@@ -55,6 +56,22 @@ export function apply(ctx, options = {}) {
       },
       'grok-subscription: startup lifetime',
     )
+  }
+
+  // Route this plugin's Grok origin through the configured tunnel (GROK_PROXY)
+  // for the plugin's lifetime: chat, catalog and billing all reach the same
+  // host, and leaving the rest of the host's traffic direct is the point.
+  void ensureApiRouting().then(mode => {
+    if (mode === 'direct') return
+    ctx.logger?.debug?.('Grok subscription API route: %s', mode)
+  }).catch(error => {
+    ctx.logger?.debug?.(
+      'Grok subscription API route skipped: %s',
+      error instanceof Error ? error.message : 'unknown',
+    )
+  })
+  if (typeof ctx.effect === 'function') {
+    ctx.effect(() => () => resetApiRouting(), 'grok-subscription: API proxy route')
   }
 
   const notifyCatalogChange = () => {

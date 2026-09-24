@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { PLUGIN_ID } from './constants.js'
+import { readResponseJson } from './http-json.js'
 
 export const PACKAGE_NAME = PLUGIN_ID
 export const NPM_REGISTRY_LATEST_URL = `https://registry.npmjs.org/${PACKAGE_NAME}/latest`
@@ -178,7 +179,7 @@ export function createGrokPluginManager({
     if (!response.ok) throw new Error('Grok plugin version check failed')
     let version
     try {
-      version = (await response.json())?.version
+      version = (await readResponseJson(response))?.version
     } catch {
       version = undefined
     }

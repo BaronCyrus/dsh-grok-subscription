@@ -31,7 +31,7 @@ Models, reasoning effort, and weekly quota all stay inside DSH.
    dsh plugin --profile web add BaronCyrus/dsh-grok-subscription
    ```
 
-2. **Sign in to the subscription.** Open **Settings → Grok Subscription** and click **CLI login** or **Device-code login**, then finish the official prompt in the terminal that started DSH. If you already ran `grok login` yourself, just click **Pull from Grok CLI** — nothing has to be pasted.
+2. **Sign in to the subscription.** Open **Settings → Grok Subscription** and click **CLI login** or **Device-code login**. The plugin runs the official `grok login`, hands the link the CLI prints to your browser, and shows the one-time code plus a clickable link in the panel; the session syncs itself once you authorize. If you already ran `grok login` yourself, just click **Pull from Grok CLI** — nothing has to be pasted.
 3. **Start using it.** Pick a model such as Grok 4.7 in the model picker. The round badge next to the picker shows weekly remaining quota, and the model menu offers reasoning effort levels.
 
 Restart `dsh web` after installing or upgrading, otherwise the old `lib/` keeps running.
@@ -209,6 +209,7 @@ npx -y @deepseek-ai/dsh@0.1.5-rc.2 plugin --profile web remove dsh-grok-subscrip
 
 - **`dsh` is not recognized**: the official npm route never creates a global `dsh` command — use the full `npx -y @deepseek-ai/dsh@0.1.5-rc.2 ...` command above;
 - **The model list is empty**: nothing is exposed while signed out. Finish signing in, then click **Pull from Grok CLI**;
+- **Sign-in opens no browser / chat fails with `fetch failed` / usage says "Billing request timed out"**: all three have one cause — `accounts.x.ai` and `cli-chat-proxy.grok.com` need a tunnel on some networks. Add `GROK_PROXY=http://127.0.0.1:10808` to `~/.dsh/.env`: it applies to **this plugin's Grok requests** (catalog, usage, chat) and to the **`grok` CLI** it spawns (sign-in, renewal), while DSH and every other provider stay direct — an `http_proxy` line there would route them all through the tunnel and break them whenever it is down. Restart the client afterwards; the sign-in link is handed to your browser and the panel also shows the one-time code and a clickable link. Standard proxy variables already present in the environment are inherited by the CLI too;
 - **Nothing changed after upgrading**: the plugin keeps running the old `lib/` — reinstall the plugin, restart `dsh web`, and hard-refresh (Ctrl+Shift+R);
 - **It reports `auth.json` permissions**: apply the `chmod 600` above; the plugin refuses symlinks and group- or other-readable files;
 - **"No reply" after sending a message**: upgrade to `1.0.1` or later. `1.0.0` had a defect where tool-calling turns aborted with a non-serializable stream chunk, leaving no reply in the UI at all.

@@ -1,4 +1,4 @@
-import { RPC_HANDLER_TIMEOUT_MS } from './constants.js'
+import { LOGIN_HANDLER_TIMEOUT_MS, RPC_HANDLER_TIMEOUT_MS } from './constants.js'
 import { publicError, publicResult } from './rpc-contract.js'
 import { withTimeout } from './session.js'
 
@@ -127,6 +127,9 @@ export function createRpcHandler(session, options = {}) {
   const timeoutMs = typeof options.timeoutMs === 'number' && options.timeoutMs > 0
     ? options.timeoutMs
     : RPC_HANDLER_TIMEOUT_MS
+  const loginTimeoutMs = typeof options.loginTimeoutMs === 'number' && options.loginTimeoutMs > 0
+    ? options.loginTimeoutMs
+    : LOGIN_HANDLER_TIMEOUT_MS
   return async function handle(endpoint, payload, signal) {
     try {
       const operation = dispatch(session, endpoint, options.diagnostics, payload, signal, options.pluginManager)
@@ -134,10 +137,13 @@ export function createRpcHandler(session, options = {}) {
       // manager owns that bounded timeout, so wrapping it here would cancel a
       // healthy install.
       if (endpoint === 'plugin/update') return await operation
+      // Login answers once the CLI prints its sign-in URL (it waits on the
+      // browser in the background), which can outlast a plain account RPC.
+      const ceiling = endpoint === 'login/cli' || endpoint === 'login/device' ? loginTimeoutMs : timeoutMs
       return await withTimeout(
         operation,
-        timeoutMs,
-        `Grok subscription RPC "${endpoint}" timed out after ${timeoutMs}ms`,
+        ceiling,
+        `Grok subscription RPC "${endpoint}" timed out after ${ceiling}ms`,
         { unref: false },
       )
     } catch (error) {

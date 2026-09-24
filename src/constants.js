@@ -73,3 +73,11 @@ export const IMPORT_TIMEOUT_MS = 2_500
 export const CREDENTIALS_IO_TIMEOUT_MS = 1_500
 /** Host-side hard timeout for each Grok subscription RPC handler. */
 export const RPC_HANDLER_TIMEOUT_MS = 8_000
+/**
+ * How long `grok login` may take to print its sign-in URL before the RPC answers
+ * without one. The CLI keeps running afterwards, so a slow link can still reach
+ * the browser; the reply only decides what the panel can show.
+ */
+export const LOGIN_START_TIMEOUT_MS = 10_000
+/** Login endpoints answer as soon as the URL is known, so one ceiling covers start + sync. */
+export const LOGIN_HANDLER_TIMEOUT_MS = 20_000
