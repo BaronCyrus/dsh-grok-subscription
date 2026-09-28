@@ -6,12 +6,9 @@ export const DISPLAY_NAME_ZH = 'Grok 订阅'
 export const SETTINGS_NAMESPACE = 'grokSubscription'
 export const LOCALE_NS = 'settings.grokSubscription'
 export const CHANNEL = '/grok-subscription'
-export const RPC_METHOD_PREFIX = 'grok-subscription'
 export const CREDENTIAL_REF_NAME = 'GROK_BUILD_ACCESS_TOKEN'
 
-export const PROXY_ORIGIN = 'https://cli-chat-proxy.grok.com'
 export const PROXY_BASE_URL = 'https://cli-chat-proxy.grok.com/v1'
-export const RESPONSES_URL = 'https://cli-chat-proxy.grok.com/v1/responses'
 export const MODELS_V2_URL = 'https://cli-chat-proxy.grok.com/v1/models-v2'
 export const BILLING_CREDITS_URL = 'https://cli-chat-proxy.grok.com/v1/billing?format=credits'
 export const USAGE_PAGE_URL = 'https://grok.com/?_s=usage'
@@ -26,7 +23,6 @@ export const CLIENT_IDENTIFIER = 'grok-shell'
 export const CLIENT_VERSION_FALLBACK = '1.0.5'
 
 export const API_KEY_SCOPE = 'xai::api_key'
-export const LEGACY_SIGNIN_SCOPE = 'https://accounts.x.ai/sign-in'
 export const XAI_OAUTH_ISSUER = 'https://auth.x.ai'
 export const SESSION_AUTH_MODES = Object.freeze(['oidc', 'external', 'web_login', 'grok'])
 export const API_KEY_AUTH_MODES = Object.freeze(['api_key'])

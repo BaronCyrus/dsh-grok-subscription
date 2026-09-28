@@ -191,9 +191,9 @@ test('diagnostics rows report the active adapter and image capability', () => {
   assert.match(piAi, /«adapterPiAi»/)
   assert.match(piAi, /«imageInputOn»/)
 
-  const fallback = render2({ adapter: 'fallback', imageInput: false })
-  assert.match(fallback, /«adapterFallback»/)
-  assert.match(fallback, /«imageInputOff»/, 'the capability row must be honest about the fallback')
+  const unavailable = render2({ adapter: 'unavailable', imageInput: false })
+  assert.match(unavailable, /«adapterUnavailable»/)
+  assert.match(unavailable, /«imageInputOff»/, 'the capability row must be honest about an unavailable adapter')
 
   // Missing or unexpected shapes must not crash the panel.
   for (const shape of [{}, { adapter: 'unknown' }, { imageInput: true }, { adapter: null, imageInput: null }]) {

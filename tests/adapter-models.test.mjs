@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { visiblePiModels, createDuckAdapter } from '../src/adapter.js'
+import { visiblePiModels } from '../src/adapter.js'
 import { PROVIDER_ID } from '../src/constants.js'
 
 function fakeSession({ signedIn = false, models = [] } = {}) {
@@ -22,6 +22,8 @@ const sample = Object.freeze({
   source: 'live',
 })
 
+// The models the host's PiAiAdapter lists come from provider.getModels(), which
+// this function backs on every call.
 test('visiblePiModels is empty when signed out (fail-closed)', () => {
   const models = visiblePiModels(fakeSession({
     signedIn: false,
@@ -38,36 +40,7 @@ test('visiblePiModels returns grok-build models when signed in', () => {
   assert.equal(models.length, 1)
   assert.equal(models[0].id, 'grok-4.7')
   assert.equal(models[0].provider, PROVIDER_ID)
+  assert.deepEqual(models[0].thinkingLevelMap && Object.keys(models[0].thinkingLevelMap), [
+    'off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max',
+  ])
 })
-
-test('duck listModels follows session.models and signed-in gate', async () => {
-  const session = fakeSession({ signedIn: true, models: [sample] })
-  const duck = createDuckAdapter(session)
-  const listed = await duck.listModels(PROVIDER_ID)
-  assert.equal(listed.length, 1)
-  assert.equal(listed[0].id, 'grok-4.7')
-  assert.equal(listed[0].provider, PROVIDER_ID)
-
-  const signedOut = createDuckAdapter(fakeSession({ signedIn: false, models: [sample] }))
-  assert.deepEqual(await signedOut.listModels(PROVIDER_ID), [])
-})
-
-test('duck listModels and resolveModel expose reasoning efforts for signed-in sample', async () => {
-  const session = fakeSession({ signedIn: true, models: [sample] })
-  const duck = createDuckAdapter(session)
-  const listed = await duck.listModels(PROVIDER_ID)
-  assert.equal(listed.length, 1)
-  const effortIds = listed[0].reasoning.efforts.map(item => item.id)
-  assert.deepEqual(effortIds, ['low', 'medium', 'high', 'xhigh'])
-  assert.ok(listed[0].reasoning.defaultEffort)
-
-  const resolved = await duck.resolveModel(PROVIDER_ID, 'grok-4.7')
-  const resolvedIds = resolved.reasoning.efforts.map(item => item.id)
-  assert.ok(resolvedIds.includes('low'))
-  assert.ok(resolvedIds.includes('medium'))
-  assert.ok(resolvedIds.includes('high'))
-  assert.ok(resolvedIds.includes('xhigh'))
-  assert.ok(resolved.reasoning.defaultEffort)
-  assert.equal(resolved.context.contextWindow, 500_000)
-})
-

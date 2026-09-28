@@ -1,21 +1,11 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { optionalImport, createGrokBuildAdapterSync, createDuckHostAdapter } from '../src/adapter.js'
-import { PROVIDER_ID } from '../src/constants.js'
+import { optionalImport } from '../src/adapter.js'
 
 function neverResolves() {
   return new Promise(() => {
     // Intentionally never resolves.
   })
-}
-
-function fakeSession({ signedIn = false, models = [] } = {}) {
-  return {
-    publicAccount: () => ({ signedIn }),
-    models: () => models,
-    currentToken: async () => (signedIn ? 'token' : undefined),
-    logout: async () => {},
-  }
 }
 
 test('optionalImport returns undefined when importFn never settles (timeout)', async () => {
@@ -45,18 +35,4 @@ test('optionalImport returns the module when importFn resolves', async () => {
     importFn: async () => ({ ok: true }),
   })
   assert.deepEqual(mod, { ok: true })
-})
-
-test('createGrokBuildAdapterSync / createDuckHostAdapter need no dynamic imports', async () => {
-  const session = fakeSession({ signedIn: true, models: [{ id: 'grok-4.7', name: 'Grok 4.7' }] })
-  const sync = createGrokBuildAdapterSync(session)
-  assert.equal(sync.kind, 'custom-mvp')
-  assert.ok(sync.adapter)
-  const listed = await sync.adapter.listModels(PROVIDER_ID)
-  assert.equal(listed.length, 1)
-  assert.equal(listed[0].id, 'grok-4.7')
-
-  const alias = createDuckHostAdapter(session)
-  assert.equal(alias.kind, 'custom-mvp')
-  assert.deepEqual(await alias.adapter.listModels(PROVIDER_ID), listed)
 })

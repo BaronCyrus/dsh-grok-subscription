@@ -6,37 +6,20 @@ For quick setup, see the [README](../README.en.md#install). This guide covers de
 
 ## Installation and compatibility
 
-You need DeepSeek Harness, the official Grok Build CLI, and an account with Grok Build access. The plugin declares Node.js `^22.19.0 || >=24.0.0`; DSH peers use `>=0.1.5-rc.2 <0.3.0-0`, which spans the whole 0.1 and 0.2 lines. See [package.json](../package.json) for the full requirements. Declared compatibility is not a claim that every version has passed live verification.
+You need the DeepSeek Harness desktop app, the official Grok Build CLI, and an account with Grok Build access. The plugin declares Node.js `^22.19.0 || >=24.0.0`; DSH peers use `>=0.1.5-rc.2 <0.3.0-0`, which spans the whole 0.1 and 0.2 lines. See [package.json](../package.json) for the full requirements. Declared compatibility is not a claim that every version has passed live verification.
 
-**Install from npm:**
+**Install:** in the desktop app open **Settings → Plugins**, type the package name `dsh-grok-subscription` into the install field, and install it. Then **quit and restart the desktop app completely**; refreshing the page alone does not reload the Host adapter. To pin a version, put the full `package@version` in that field, for example `dsh-grok-subscription@2.0.0`.
 
-```sh
-dsh plugin --profile web add dsh-grok-subscription@latest
-dsh plugin --profile web list dsh-grok-subscription --depth 0
-```
+**The plugin depends on the host's own pi-ai adapter.** From 2.0.0 the `grok-build` route is served entirely by the host's `@deepseek-ai/dsh-llm-pi-ai` / `@earendil-works/pi-ai`, which every DSH installation carries (`@deepseek-ai/dsh` → `dsh-base` → `dsh-llm-pi-ai`, with the `llm-pi-ai` row mounted unconditionally). If those packages cannot be resolved from the DSH installation, the plugin registers no route at all and **Active path** in Settings reads **unavailable**.
 
-For reproducibility, pin a published version, for example:
+If the UI install fails (an unusual profile directory, say), the equivalent runs against the desktop profile itself (pnpm ≥ 11):
 
 ```sh
-dsh plugin --profile web add dsh-grok-subscription@1.2.0
+cd "$HOME/.dsh/profiles/desktop"    # Windows: cd "$env:USERPROFILE\.dsh\profiles\desktop"
+pnpm add --save-exact --config.minimumReleaseAge=0 dsh-grok-subscription@2.0.0
 ```
 
-**Install from GitHub:**
-
-```sh
-dsh plugin --profile web add BaronCyrus/dsh-grok-subscription
-```
-
-The GitHub branch and published npm package may differ. Choose an installation source deliberately; a source commit does not mean a new npm version has been published.
-
-If you launch DSH with `npx` and have no global `dsh` command, retain the full prefix for plugin operations. This example uses the baseline declared in the package:
-
-```sh
-npx -y @deepseek-ai/dsh@0.1.5-rc.2 plugin --profile web add dsh-grok-subscription@latest
-npx -y @deepseek-ai/dsh@0.1.5-rc.2 plugin --profile web list dsh-grok-subscription --depth 0
-```
-
-Restart the target DSH instance after installation. For local diagnosis, `dsh --profile web --dump-config` should show one `grok-build` route. Redact sensitive settings and personal paths before sharing diagnostics; do not post the full configuration.
+`dsh plugin --profile desktop …` is refused: the Electron application owns that profile exclusively.
 
 ## Sign-in and credentials
 
@@ -64,7 +47,7 @@ After sign-in, the plugin prefers the catalog from `/v1/models-v2`; while signed
 
 Reasoning options follow model metadata. The implementation recognizes `low` / `medium` / `high` / `xhigh`, usually defaulting to `high`; the built-in `grok-4.5` entry has only the first three. Follow the actual menu and backend-supported choices. See [catalog.js](../src/catalog.js).
 
-Login, pull, logout, and catalog refresh notify the model picker. Near a known token expiry, or after an authentication rejection, the plugin attempts renewal through the official CLI. If renewal fails, authorization may still be required again; uninterrupted sessions are not guaranteed.
+Login, pull, logout, and catalog refresh notify the model picker. Near a known token expiry the plugin renews through the official CLI. If renewal fails, or the server has already revoked the session, authorization may still be required again; uninterrupted sessions are not guaranteed.
 
 ## Image input
 
@@ -80,7 +63,7 @@ These exact IDs come from `IMAGE_INPUT_MODEL_IDS` in [constants.js](../src/const
 
 Paste or attach an image in the composer. DSH's attachment service processes it within pixel and byte budgets; over-budget images may degrade to a text description. Do not assume every image is sent at its original resolution.
 
-From 1.2.0 the plugin runs the host's official pi-ai adapter, which owns the image pipeline (attachment resolution plus pixel and byte budgets). The bundled adapter stays as the automatic fallback: it is what serves the route if the pi-ai packages are missing, or if the Host refuses the hand-over. The **Active path** row in Settings names the adapter actually serving the route, and whether image input is available. After an update, a refreshed browser can still be using an old adapter if the Host was not restarted. To pin the bundled adapter deliberately — for instance if a Host adapter misbehaves on your account — set `DSH_GROK_ADAPTER=fallback` in `~/.dsh/.env` and restart DSH.
+The `grok-build` route is served by the host's official pi-ai adapter, which also owns the image pipeline (attachment resolution plus pixel and byte budgets). The **Active path** row in Settings names the adapter serving the route and whether image input is available; **unavailable** means the host has no pi-ai adapter. After an update, a refreshed browser can still be running the old version if the Host was not restarted.
 
 ## Quota and caching
 
@@ -88,27 +71,9 @@ Usage is read through the undocumented `/v1/billing?format=credits` endpoint and
 
 The composer badge appears only for `grok-build` with a successful usage read; hover or click for weekly quota and its reset time. Missing data does not mean zero quota. A failed read does not invent percentages or independently block chat.
 
-For prefix caching, the plugin pins one stable `prompt_cache_key` per DSH session on **both** adapter paths — the bundled adapter builds it, and on the host's pi-ai path the plugin assigns the same `grok:<sessionId>` value into the request. Tool ordering stays stable. Auxiliary requests (compaction, session titles) share the session's key rather than taking a separate one; measured against the proxy, isolating them did not improve the chat prefix's cache reads. These are request-construction measures, not a guarantee of backend cache hits or quota savings. No invented hit rate is reported. See [adapter.js](../src/adapter.js).
-
-## Headless usage
-
-First complete subscription sign-in through the Grok CLI on the same host and verify Web usage. Then install the plugin into the target Headless profile:
-
-```sh
-dsh plugin --profile headless add dsh-grok-subscription@latest
-```
-
-Confirm that this profile's model configuration selects a `grok-build` model the account can use, then run a one-shot interactive task:
-
-```sh
-dsh --profile headless "reply with exactly: ok"
-```
-
-That task makes a real model request and uses the selected service's quota; it is not an offline check. Selecting a model in Web is not proof that another profile is configured correctly.
+For prefix caching, the plugin pins one stable `prompt_cache_key` per DSH session (`grok:<sessionId>`) and writes it into every request; tool ordering stays stable. Auxiliary requests (compaction, session titles) share the session's key rather than taking a separate one; measured against the proxy, isolating them did not improve the chat prefix's cache reads. These are request-construction measures, not a guarantee of backend cache hits or quota savings. No invented hit rate is reported. See [adapter.js](../src/adapter.js).
 
 ## Troubleshooting
-
-**`dsh` not found.** Use the full `npx` prefix you use to launch DSH, or check the installed launcher's path.
 
 **`grok` not found or no login window.** Check that the CLI is installed on the DSH Host and its process sees `DSH_GROK_BIN` / `PATH`. Look for a clickable login link in the panel. A browser failing to open does not by itself prove the authorization service is unreachable. On Windows, if the CLI is not on `PATH`, put the absolute `grok.exe` path in the user-level `DSH_GROK_BIN` (for example `setx DSH_GROK_BIN "C:\Users\<user>\.grok\bin\grok.exe"`) and restart DSH completely; note that `DSH_*` is a DSH bootstrap prefix, so declaring it in `~/.dsh/.env` makes that environment layer fail.
 
@@ -118,28 +83,30 @@ That task makes a real model request and uses the selected service's quota; it i
 
 **Chat or usage returns `401`.** Check the CLI session. If automatic renewal fails, run `grok login` again, authorize, and pull the session. Do not repeatedly paste an old token.
 
-**Images rejected.** Check the supported IDs and attachment capability under **Active path**. Fully restart the Host after updating, then refresh the browser.
+**Images rejected.** Check the supported IDs, confirm **Active path** reads **official pi-ai** with attachment capability available, and fully restart the desktop app after updating.
 
 **Auth-file permission error.** Check the actual path, owner, symlink status, and permissions. `chmod 600` fixes permission bits only.
 
 **No response on an old release.** Version `1.0.0` had a tool-call serialization defect fixed in `1.0.1`; older versions may also lack later renewal fixes. Update to the current published version before diagnosing a persistent problem rather than attributing every missing response to that old defect.
 
-**The plugin vanished from Settings after a DSH update.** From 0.2.0 DSH refuses a plugin whose `@deepseek-ai/dsh*` peer ranges do not admit the running version, and it drops the whole bundle before any plugin code loads: no `grok-build` route, no Settings section, and nothing in the panel to explain it. The Host writes `skipping profile bundle "dsh-grok-subscription"` to its own stderr, and `dsh --profile web --dump-config` omits the `grok-subscription` row. Update the plugin rather than granting a version exemption: an exemption re-enables a build that was never checked against that Host.
+**The plugin vanished from Settings after a DSH update.** From 0.2.0 DSH refuses a plugin whose `@deepseek-ai/dsh*` peer ranges do not admit the running version, and it drops the whole bundle before any plugin code loads: no `grok-build` route, no Settings section, and nothing in the panel to explain it. The Host writes `skipping profile bundle "dsh-grok-subscription"` to its own stderr (the desktop app refuses `dsh --profile desktop --dump-config`, so that line is the evidence to look for). Update the plugin rather than granting a version exemption: an exemption re-enables a build that was never checked against that Host.
+
+**Active path reads "unavailable".** The host has no pi-ai adapter: `@earendil-works/pi-ai` or `@deepseek-ai/dsh-llm-pi-ai` cannot be resolved from the DSH installation. Check that the installation is complete, that `node_modules` was not pruned by hand, and restart the desktop app completely.
 
 ## Updates and sign-out
 
-For npm installs, update in Settings or run `dsh plugin --profile web add dsh-grok-subscription@latest`. For GitHub-source installs, run `dsh plugin --profile web update dsh-grok-subscription`. For local links, pull, test, and rebuild the checkout. Restart DSH afterwards.
+**Update:** put `dsh-grok-subscription` (or `dsh-grok-subscription@version`) into the **Settings → Plugins** install field again to install over the current copy; the plugin's own page also has a version card and an **Update plugin** button. Then **quit and restart the desktop app completely**.
 
 In the desktop app the `desktop` profile is owned exclusively by the Electron application, and `dsh plugin --profile desktop …` is refused outright (`profile "desktop" is managed exclusively by the Electron application`), so the desktop app can only be updated by the plugin itself. From 1.1.1 the **Update plugin** button installs the exact version inside that profile directory with DSH's own bundled pnpm. If you are still on an older version and the button reports an error, run the equivalent by hand (pnpm ≥ 11):
 
 ```sh
 cd "$HOME/.dsh/profiles/desktop"    # Windows: cd "$env:USERPROFILE\.dsh\profiles\desktop"
-pnpm add --save-exact dsh-grok-subscription@1.2.0
+pnpm add --save-exact --config.minimumReleaseAge=0 dsh-grok-subscription@2.0.0
 ```
 
 Then quit and restart the desktop app completely. After a successful update the profile's `package.json` dependency should show the target version while its `dsh.profile.bundles` entry is unchanged. Refreshing the browser is not enough: without a Host restart the old version keeps loading.
 
-Uninstall with `dsh plugin --profile web remove dsh-grok-subscription`. This leaves the profile, other plugins, and the CLI's `auth.json` intact.
+**Uninstall:** remove `dsh-grok-subscription` in **Settings → Plugins**, or run `pnpm remove dsh-grok-subscription` in that profile directory. This leaves the profile, other plugins, and the CLI's `auth.json` intact.
 
 The Settings logout action clears plugin-side session state; it does not revoke the official CLI session. If the CLI file remains, a later pull or startup may sync it again. To end the official session, use the official CLI / account's sign-out and authorization-management flow. Do not delete an entire DSH profile to handle one account.
 

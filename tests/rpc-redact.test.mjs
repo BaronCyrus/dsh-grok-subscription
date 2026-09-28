@@ -27,19 +27,17 @@ test('status RPC carries adapter diagnostics without leaking secrets', async () 
     }),
   }, {
     diagnostics: () => ({
-      adapter: 'fallback',
-      adapterKind: 'custom-mvp',
+      adapter: 'pi-ai',
       imageInput: true,
-      hostPeersResolved: false,
+      hostPeersResolved: true,
     }),
   })
   const result = await handler('status', {}, undefined)
   assert.equal(result.ok, true)
   assert.deepEqual(result.value.diagnostics, {
-    adapter: 'fallback',
-    adapterKind: 'custom-mvp',
+    adapter: 'pi-ai',
     imageInput: true,
-    hostPeersResolved: false,
+    hostPeersResolved: true,
   })
   assert.equal(result.value.accessToken, undefined)
 })

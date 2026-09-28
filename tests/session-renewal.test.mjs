@@ -2,8 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
 import { createSessionService, spawnGrokRefresh } from '../src/session.js'
-import { createDuckAdapter } from '../src/adapter.js'
-import { PROVIDER_ID, TOKEN_EXPIRY_SKEW_MS } from '../src/constants.js'
+import { TOKEN_EXPIRY_SKEW_MS } from '../src/constants.js'
 
 const NOW = Date.parse('2026-09-22T08:00:00Z')
 const iso = ms => new Date(ms).toISOString()
@@ -185,108 +184,4 @@ test('refreshToken forces renewal even for a token that is still valid', async (
   await service.status()
   assert.equal(await service.refreshToken(), 'fresh')
   assert.equal(renewals, 1)
-})
-
-// --------------------------------------------------------- provider 401 path
-
-const encoder = new TextEncoder()
-function sseResponse(frames) {
-  const text = frames.map(frame => `event: ${frame.type}\ndata: ${JSON.stringify(frame)}\n\n`).join('')
-  return new Response(new ReadableStream({
-    start(controller) { controller.enqueue(encoder.encode(text)); controller.close() },
-  }), { status: 200, headers: { 'content-type': 'text/event-stream' } })
-}
-
-const okFrames = [
-  { type: 'response.output_text.delta', delta: 'hello' },
-  { type: 'response.completed', response: { status: 'completed', output: [], usage: { input_tokens: 1, output_tokens: 1 } } },
-]
-
-async function runStream(session, fetchImpl) {
-  const original = globalThis.fetch
-  globalThis.fetch = fetchImpl
-  try {
-    const duck = createDuckAdapter(session)
-    const chunks = []
-    for await (const chunk of duck.stream({
-      provider: PROVIDER_ID,
-      model: 'grok-4.7',
-      messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }],
-    })) chunks.push(chunk)
-    return chunks
-  } finally {
-    globalThis.fetch = original
-  }
-}
-
-function fakeSession({ token = 'stale', renewed = 'fresh' } = {}) {
-  return {
-    publicAccount: () => ({ signedIn: true }),
-    models: () => [],
-    currentToken: async () => token,
-    refreshToken: async () => renewed,
-    logout: async () => {},
-  }
-}
-
-test('a provider 401 renews the token and retries once', async () => {
-  let calls = 0
-  const chunks = await runStream(fakeSession(), async () => {
-    calls += 1
-    if (calls === 1) return new Response('nope', { status: 401 })
-    return sseResponse(okFrames)
-  })
-  assert.equal(calls, 2, 'the call must be retried exactly once')
-  assert.equal(chunks.filter(chunk => chunk.type === 'text-delta').map(chunk => chunk.text).join(''), 'hello')
-  assert.equal(chunks.at(-1).reason.kind, 'stop')
-})
-
-test('a second 401 is not retried again', async () => {
-  let calls = 0
-  const chunks = await runStream(fakeSession(), async () => {
-    calls += 1
-    return new Response('nope', { status: 401 })
-  })
-  assert.equal(calls, 2, 'at most one retry')
-  assert.equal(chunks.at(-1).reason.kind, 'error')
-  assert.equal(chunks.at(-1).reason.failure.code, 'UNAUTHORIZED')
-  assert.equal(chunks.at(-1).reason.failure.status, 401)
-})
-
-test('a non-401 failure is not retried and does not renew', async () => {
-  let calls = 0
-  let renewals = 0
-  const session = fakeSession()
-  session.refreshToken = async () => { renewals += 1; return 'fresh' }
-  const chunks = await runStream(session, async () => {
-    calls += 1
-    return new Response('boom', { status: 500 })
-  })
-  assert.equal(calls, 1)
-  assert.equal(renewals, 0)
-  assert.equal(chunks.at(-1).reason.failure.status, 500)
-})
-
-test('a renewal that yields no new token surfaces the original 401', async () => {
-  let calls = 0
-  const session = fakeSession()
-  session.refreshToken = async () => undefined
-  const chunks = await runStream(session, async () => {
-    calls += 1
-    return new Response('nope', { status: 401 })
-  })
-  assert.equal(calls, 1, 'no retry without a fresh token')
-  assert.equal(chunks.at(-1).reason.failure.code, 'UNAUTHORIZED')
-})
-
-test('a session without refreshToken still reports the 401 cleanly', async () => {
-  const session = fakeSession()
-  delete session.refreshToken
-  let calls = 0
-  const chunks = await runStream(session, async () => {
-    calls += 1
-    return new Response('nope', { status: 401 })
-  })
-  assert.equal(calls, 1)
-  assert.equal(chunks.at(-1).reason.failure.status, 401)
 })

@@ -5,7 +5,6 @@ import { createRpcHandler } from './rpc.js'
 import { registerSubscriptionTransport } from './transport.js'
 import {
   createGrokBuildAdapter,
-  createGrokBuildAdapterSync,
   optionalImport,
 } from './adapter.js'
 export const name = CORDIS_ID
@@ -29,66 +28,6 @@ function softService(ctx, key) {
     // Cordis get may throw when the service is absent; soft-fail.
   }
   return undefined
-}
-
-/**
- * Claim this plugin's provider route and return the host's release handle.
- *
- * `ctx.llm.registerAdapter` refuses a second adapter for a provider that
- * already has one (`DUPLICATE_ADAPTER`, all-or-nothing) in every release this
- * plugin supports, so the route must be released before the pi-ai upgrade can
- * take it over.
- */
-function registerProviderAdapter(ctx, adapter) {
-  const handle = ctx.llm.registerAdapter([PROVIDER_ID], adapter)
-  return typeof handle === 'function' ? handle : undefined
-}
-
-/**
- * Hand the route from the synchronously registered bundled adapter to the
- * host's official pi-ai adapter.
- *
- * Release and re-register in one synchronous step, so no request can observe
- * the route unserved, and restore the bundled adapter if the host refuses the
- * replacement: a Settings page that says "bundled fallback" is honest, a
- * provider route that streams nothing is not.
- *
- * @param ctx - plugin scope owning both registrations.
- * @param adapter - the prepared pi-ai adapter.
- * @param registration - mutable holder of the live adapter and its release handle.
- */
-function upgradeProviderAdapter(ctx, adapter, registration) {
-  const previous = registration.adapter
-  registration.release?.()
-  registration.release = undefined
-  registration.adapter = undefined
-  try {
-    registration.release = registerProviderAdapter(ctx, adapter)
-    registration.adapter = adapter
-  } catch (error) {
-    if (previous !== undefined) {
-      try {
-        registration.release = registerProviderAdapter(ctx, previous)
-        registration.adapter = previous
-      } catch {
-        registration.release = undefined
-      }
-    }
-    throw error
-  }
-}
-
-/**
- * Documented rollback: `DSH_GROK_ADAPTER=fallback` keeps the bundled adapter
- * even where the host's official one is available, so a host adapter that
- * misbehaves in real use can be switched off without waiting for a release.
- * Set it in DSH's own environment (`~/.dsh/.env`), not the project's.
- */
-export function adapterOverride(env = process.env) {
-  const value = typeof env?.DSH_GROK_ADAPTER === 'string'
-    ? env.DSH_GROK_ADAPTER.trim().toLowerCase()
-    : ''
-  return value === 'fallback' ? 'fallback' : undefined
 }
 
 /**
@@ -136,19 +75,21 @@ export function apply(ctx, options = {}) {
     logger: ctx.logger,
     onCatalogChange: notifyCatalogChange,
   })
-  // Which adapter is live: the sync fallback until the deferred upgrade swaps in
-  // the host's official pi-ai implementation. Surfaced to Settings so a
-  // capability question ("why can't I attach an image?") is answerable without
-  // reading logs.
-  const adapterState = { kind: 'custom-mvp', upgraded: false }
+  /**
+   * How the `grok-build` route is served: `starting` until the deferred
+   * registration lands, `pi-ai` once the host's adapter owns it, and
+   * `unavailable` when the host's pi-ai packages could not be resolved.
+   * Surfaced to Settings so a capability question ("why can't I attach an
+   * image?") is answerable without reading logs.
+   */
+  const adapterState = { kind: 'starting' }
   const pluginManager = options.pluginManager ?? createGrokPluginManager()
   const handler = createRpcHandler(session, {
     pluginManager,
     diagnostics: () => ({
-      adapter: adapterState.upgraded ? 'pi-ai' : 'fallback',
-      adapterKind: adapterState.kind,
+      adapter: adapterState.kind,
       imageInput: typeof resolveAttachments()?.readImageRequest === 'function',
-      hostPeersResolved: adapterState.upgraded,
+      hostPeersResolved: adapterState.kind === 'pi-ai',
     }),
   })
 
@@ -156,32 +97,13 @@ export function apply(ctx, options = {}) {
   // after this plugin and is only consulted when a request carries an image.
   const resolveAttachments = attachmentResolver(ctx)
 
-  const createSync = options.createSync ?? createGrokBuildAdapterSync
-  /** The adapter serving the route now, and the handle that releases it. */
-  const registration = { adapter: undefined, release: undefined }
-  // Register a duck host adapter synchronously so apply returns immediately
-  // and the plugin list / Settings RPC are never blocked on pi-ai imports.
-  try {
-    const created = createSync(session, { resolveAttachments })
-    if (created.note) ctx.logger?.debug?.(created.note)
-    adapterState.kind = created.kind
-    registration.adapter = created.adapter
-    registration.release = registerProviderAdapter(ctx, created.adapter)
-    // Catalog notify deferred so pickers refresh without re-entering apply.
-    notifyCatalogChange()
-  } catch (error) {
-    ctx.logger?.warn?.(
-      'Grok subscription duck adapter failed to register: %s',
-      error instanceof Error ? error.message : 'unknown',
-    )
-  }
-
+  // The adapter is built from the host's pi-ai packages, so it is registered
+  // from a deferred task rather than inside apply: `apply` must return before
+  // the plugin list renders, and a pending dynamic import there is what wedged
+  // Settings → Plugins ("Reading plugins…") in earlier releases.
   const defer = options.defer ?? scheduleDeferred
-  const deferredOptions = adapterOverride() === 'fallback'
-    ? { ...options, skipUpgrade: true }
-    : options
   defer(() => {
-    void deferredBoot(ctx, session, notifyCatalogChange, deferredOptions, adapterState, registration)
+    void deferredBoot(ctx, session, notifyCatalogChange, options, adapterState)
   })
 
   ctx.inject(['connection'], connectionContext => connectionContext.effect(
@@ -190,7 +112,7 @@ export function apply(ctx, options = {}) {
   ))
 }
 
-async function deferredBoot(ctx, session, notifyCatalogChange, options = {}, adapterState, registration) {
+async function deferredBoot(ctx, session, notifyCatalogChange, options = {}, adapterState) {
   if (!options.skipSettings) {
     await tryRegisterSettings(ctx)
   }
@@ -219,28 +141,33 @@ async function deferredBoot(ctx, session, notifyCatalogChange, options = {}, ada
     })
   }
 
-  if (options.skipUpgrade) return
+  if (options.skipAdapter) {
+    adapterState.kind = 'unavailable'
+    return
+  }
 
-  const createAsync = options.createAsync ?? createGrokBuildAdapter
+  const buildAdapter = options.buildAdapter ?? createGrokBuildAdapter
   try {
-    const created = await createAsync(session, { ...options.adapterOptions, resolveAttachments: attachmentResolver(ctx) })
-    if (created.kind === 'pi-ai') {
-      if (created.note) ctx.logger?.warn?.(created.note)
-      // The bundled adapter already owns the route: hand it over instead of
-      // re-registering, which the host refuses with DUPLICATE_ADAPTER.
-      if (registration) upgradeProviderAdapter(ctx, created.adapter, registration)
-      else ctx.llm.registerAdapter([PROVIDER_ID], created.adapter)
-      if (adapterState) {
-        adapterState.kind = created.kind
-        adapterState.upgraded = true
-      }
-      notifyCatalogChange?.()
-    } else if (created.note) {
-      ctx.logger?.debug?.(created.note)
+    const created = await buildAdapter(session, {
+      ...options.adapterOptions,
+      resolveAttachments: attachmentResolver(ctx),
+    })
+    if (!created?.adapter) {
+      adapterState.kind = 'unavailable'
+      ctx.logger?.warn?.(
+        'Grok subscription adapter is unavailable: %s',
+        created?.note ?? 'unknown',
+      )
+      return
     }
+    if (created.note) ctx.logger?.warn?.(created.note)
+    ctx.llm.registerAdapter([PROVIDER_ID], created.adapter)
+    adapterState.kind = created.kind ?? 'pi-ai'
+    notifyCatalogChange?.()
   } catch (error) {
+    adapterState.kind = 'unavailable'
     ctx.logger?.warn?.(
-      'Grok subscription adapter upgrade failed: %s',
+      'Grok subscription adapter registration failed: %s',
       error instanceof Error ? error.message : 'unknown',
     )
   }
@@ -270,8 +197,6 @@ export {
   DISPLAY_NAME,
   DISPLAY_NAME_ZH,
   deferredBoot,
-  registerProviderAdapter,
   softService,
   scheduleDeferred,
-  upgradeProviderAdapter,
 }

@@ -46,11 +46,7 @@
 
 ### 1. 安装插件
 
-```sh
-dsh plugin --profile web add dsh-grok-subscription@latest
-```
-
-完成后，**手动重启正在运行的目标 DSH**。仅刷新浏览器不会重新加载 Host 中的适配器。
+在桌面版打开 **设置 → 插件**，在安装输入框里填入包名 `dsh-grok-subscription` 并安装，然后**完全退出并重启桌面应用**。仅刷新页面不会重新加载 Host 中的适配器。
 
 ### 2. 登录订阅
 
@@ -63,19 +59,18 @@ dsh plugin --profile web add dsh-grok-subscription@latest
 在模型选择器中选择账号可用的 Grok 模型。按需要调整推理档位，开始对话或编程；模型旁的徽章显示成功读取到的每周余量。
 
 <details>
-<summary>检查安装 / 使用 npx / 安装指定版本</summary>
+<summary>确认版本 / 固定版本 / 界面安装失败时的兜底</summary>
+
+**设置 → 插件** 会列出已安装插件与版本，插件自己的 **设置 → Grok 订阅** 页也有版本卡片。要固定版本，在安装框里填入完整的 `包名@版本`，例如 `dsh-grok-subscription@2.0.0`。
+
+界面安装失败时（例如 profile 目录权限异常），可以对桌面版 profile 手动执行等价操作（pnpm ≥ 11）：
 
 ```sh
-dsh plugin --profile web list dsh-grok-subscription --depth 0
+cd "$HOME/.dsh/profiles/desktop"    # Windows: cd "$env:USERPROFILE\.dsh\profiles\desktop"
+pnpm add --save-exact --config.minimumReleaseAge=0 dsh-grok-subscription@2.0.0
 ```
 
-没有全局 `dsh` 命令时，保留你使用的完整 `npx` 前缀。以下使用项目元数据声明的基线版本作为示例：
-
-```sh
-npx -y @deepseek-ai/dsh@0.1.5-rc.2 plugin --profile web add dsh-grok-subscription@latest
-```
-
-固定 npm 版本、GitHub 来源安装、CLI 路径与 Headless 使用见 [完整使用指南](docs/guide.zh-CN.md)。
+`dsh plugin --profile desktop …` 会被拒绝：桌面版 profile 由 Electron 应用独占。CLI 路径、登录方式与故障排查见 [完整使用指南](docs/guide.zh-CN.md)。
 
 </details>
 
@@ -116,29 +111,17 @@ npx -y @deepseek-ai/dsh@0.1.5-rc.2 plugin --profile web add dsh-grok-subscriptio
 
 ## 使用指南
 
-[完整使用指南](docs/guide.zh-CN.md) 包含 CLI 登录、模型目录、图片输入、额度限制、网络排查、Headless 使用和本地开发。
+[完整使用指南](docs/guide.zh-CN.md) 包含安装与兼容性、CLI 登录、模型目录、图片输入、额度限制、网络排查和本地开发。
 
 常用入口：[登录与凭据](docs/guide.zh-CN.md#登录与凭据) · [图片输入](docs/guide.zh-CN.md#图片输入) · [故障排查](docs/guide.zh-CN.md#故障排查) · [参与贡献](CONTRIBUTING.md)。
 
 ## 更新与卸载
 
-**更新 npm 安装：** 可在设置页检查版本；支持的 npm 安装可一键更新，也可以运行：
+**更新：** 在 **设置 → 插件** 的安装框里重新填入 `dsh-grok-subscription`（或 `dsh-grok-subscription@版本`）安装即可覆盖；插件自己的设置页也有版本卡片与「更新插件」按钮。完成后**完全退出并重启桌面应用**。
 
-```sh
-dsh plugin --profile web add dsh-grok-subscription@latest
-```
+桌面版由 Electron 应用独占 `desktop` profile，`dsh plugin --profile desktop …` 会被直接拒绝，因此桌面版的「更新插件」由插件在该 profile 目录中用 DSH 自带的 pnpm 安装精确版本；`1.1.1` 之前该按钮在桌面版必然失败，手动步骤见[更新与登出](docs/guide.zh-CN.md#更新与登出)。
 
-GitHub 来源安装可使用 `dsh plugin --profile web update dsh-grok-subscription`；本地 `link:` 安装应拉取对应仓库并重新构建，不要替换开发链接。
-
-桌面版由 Electron 应用独占 `desktop` profile，`dsh plugin --profile desktop …` 会被拒绝，因此桌面版的「更新插件」由插件自己在该 profile 目录中用 DSH 自带的 pnpm 安装精确版本；`1.1.1` 之前该按钮在桌面版必然失败，手动步骤见[更新与登出](docs/guide.zh-CN.md#更新与登出)。
-
-**卸载：**
-
-```sh
-dsh plugin --profile web remove dsh-grok-subscription
-```
-
-完成后手动重启 DSH。卸载不会删除其他插件、整个 profile 或 Grok CLI 的 `auth.json`，也不等于从官方 CLI 登出；清理范围见 [更新与登出](docs/guide.zh-CN.md#更新与登出)。
+**卸载：** 在 **设置 → 插件** 里移除 `dsh-grok-subscription`，或在该 profile 目录执行 `pnpm remove dsh-grok-subscription`，然后重启桌面应用。卸载不会删除其他插件、整个 profile 或 Grok CLI 的 `auth.json`，也不等于从官方 CLI 登出；清理范围见 [更新与登出](docs/guide.zh-CN.md#更新与登出)。
 
 ## 常见问题
 
@@ -146,7 +129,7 @@ dsh plugin --profile web remove dsh-grok-subscription
 
 **登录或请求超时？** 检查 DSH 所在机器能否连接账号与订阅服务，以及启动环境的代理设置。网络、登录状态和服务端异常都可能导致失败，不要直接认定为额度耗尽。见 [故障排查](docs/guide.zh-CN.md#故障排查)。
 
-**更新后不能带图？** 完整重启 DSH，检查模型是否在图片支持列表，以及设置页的「运行通路」是否显示附件能力可用。
+**更新后不能带图？** 完整重启桌面应用，检查模型是否在图片支持列表，以及设置页的「运行通路」是否显示**官方 pi-ai** 且附件能力可用。若显示「不可用」，说明宿主缺少 pi-ai 适配器。
 
 ## 边界与支持
 

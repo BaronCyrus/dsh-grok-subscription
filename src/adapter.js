@@ -11,11 +11,10 @@ import {
   PROXY_BASE_URL,
   REQUEST_IMAGE_MAX_BYTES,
   REQUEST_IMAGE_PIXEL_BUDGET,
-  RESPONSES_URL,
   STREAM_IDLE_TIMEOUT_MS,
 } from './constants.js'
-import { reasoningInfoOf, supportsImageInput, toLlmModels, toPiModels } from './catalog.js'
-import { buildProxyHeaders, fingerprintHeaders } from './headers.js'
+import { toPiModels } from './catalog.js'
+import { fingerprintHeaders } from './headers.js'
 
 function withImportTimeout(promise, ms, message) {
   let timer
@@ -211,105 +210,22 @@ export async function optionalImport(specifier, options = {}) {
   return undefined
 }
 
-function textOf(content) {
-  if (typeof content === 'string') return content
-  if (!Array.isArray(content)) return ''
-  return content
-    .map(block => {
-      if (typeof block === 'string') return block
-      if (block?.type === 'text') return block.text ?? ''
-      if (block?.type === 'reasoning') return ''
-      if (block?.type === 'tool-result') {
-        return typeof block.content === 'string' ? block.content : textOf(block.content)
-      }
-      return ''
-    })
-    .join('')
-}
-
-/**
- * Text the model sees when an attached image could not be sent. Silence would
- * let it answer as if nothing had been attached.
- */
-function imagePlaceholderText(ref) {
-  const name = typeof ref?.name === 'string' && ref.name.trim() ? ` ${JSON.stringify(ref.name.trim())}` : ''
-  return `[attached image${name} could not be included in this request]`
-}
-
-/**
- * Read every attached image once, keyed by attachment id, so the sync input
- * builder can inline them as `input_image` parts.
- *
- * Uses the host's durable attachment store, which normalizes to the request
- * budget for us. Without the store (or if the read fails) the image degrades to
- * a text placeholder rather than vanishing.
- */
-export async function collectImageParts(options, resolveAttachments, policy = {}) {
-  const parts = new Map()
-  const refs = []
-  for (const message of options.messages ?? []) {
-    for (const block of message?.content ?? []) {
-      if (block?.type !== 'image' || !block.attachment) continue
-      const id = block.attachment.attachmentId
-      if (typeof id !== 'string' || !id || parts.has(id)) continue
-      parts.set(id, undefined)
-      refs.push(block.attachment)
-    }
-  }
-  if (refs.length === 0) return parts
-  let store
-  try {
-    store = resolveAttachments?.()
-  } catch {
-    store = undefined
-  }
-  if (!store?.readImageRequest) return parts
-  const request = {
-    maxPixels: policy.maxPixels ?? REQUEST_IMAGE_PIXEL_BUDGET,
-    maxBytes: policy.maxBytes ?? REQUEST_IMAGE_MAX_BYTES,
-  }
-  await Promise.all(refs.map(async ref => {
-    try {
-      const version = await store.readImageRequest(ref, request)
-      if (!version?.data || typeof version.mediaType !== 'string' || !version.mediaType) return
-      parts.set(ref.attachmentId, {
-        mediaType: version.mediaType,
-        base64: Buffer.from(version.data).toString('base64'),
-      })
-    } catch {
-      // Leave the entry undefined so the placeholder text is used instead.
-    }
-  }))
-  return parts
-}
-
-function imageContentParts(blocks, imageParts) {
-  const parts = []
-  const text = textOf(blocks)
-  if (text) parts.push({ type: 'input_text', text })
-  for (const block of blocks ?? []) {
-    if (block?.type !== 'image' || !block.attachment) continue
-    const resolved = imageParts?.get(block.attachment.attachmentId)
-    if (resolved) {
-      parts.push({
-        type: 'input_image',
-        image_url: `data:${resolved.mediaType};base64,${resolved.base64}`,
-      })
-    } else {
-      parts.push({ type: 'input_text', text: imagePlaceholderText(block.attachment) })
-    }
-  }
-  return parts
-}
-
 const PROMPT_CACHE_KEY_MAX_LENGTH = 64
-const REPLAY_KIND = 'grok-build-responses'
-const REPLAY_VERSION = 1
-
 /**
- * xAI routes a Responses conversation by `prompt_cache_key`. Keep one stable
- * value for the whole DSH session, including every tool step, and isolate an
- * auxiliary call so its rewritten prompt cannot evict the conversation prefix.
+ * The `prompt_cache_key` the plugin pins on the host's pi-ai path.
+ *
+ * xAI routes a Responses conversation by this key, so it must stay stable for
+ * the whole DSH session, including every tool step. pi-ai derives its own key
+ * from the session id; pinning the same value here keeps an in-flight
+ * conversation's cache warm if the adapter wiring ever changes, and keeps the
+ * documented "one session, one key" promise independent of pi-ai's default.
+ *
+ * The `purpose` suffix is unreachable on this path — `dsh-llm-pi-ai` forwards
+ * only `sessionId` into pi-ai, so compaction and session-title calls carry no
+ * purpose marker and share the session key. Isolating them was measured
+ * against the live proxy and did not improve the chat prefix's cache reads, so
+ * the shared key is deliberate. `promptCacheKey` still accepts a purpose so the
+ * helper stays a faithful description of the key format.
  */
 export function promptCacheKey(options) {
   const sessionId = typeof options?.sessionId === 'string' ? options.sessionId.trim() : ''
@@ -321,417 +237,6 @@ export function promptCacheKey(options) {
   return key.length <= PROMPT_CACHE_KEY_MAX_LENGTH ? key : key.slice(0, PROMPT_CACHE_KEY_MAX_LENGTH)
 }
 
-/** Stable tool order keeps the cacheable prefix intact when the host reorders schemas. */
-export function cacheStableTools(tools) {
-  if (!Array.isArray(tools) || tools.length === 0) return []
-  return tools.map((tool, index) => ({ tool, index }))
-    .sort((left, right) => {
-      const byName = String(left.tool?.name ?? '').localeCompare(String(right.tool?.name ?? ''))
-      return byName === 0 ? left.index - right.index : byName
-    })
-    .map(({ tool }) => ({
-      type: 'function',
-      name: tool.name,
-      description: tool.description,
-      parameters: tool.parameters,
-    }))
-}
-
-function replayEnvelope(message) {
-  const state = message?.source?.replayState
-  return (
-    state?.response?.kind === REPLAY_KIND
-    && state.response.version === REPLAY_VERSION
-    && Array.isArray(state.blocks)
-  ) ? state : undefined
-}
-
-function replayReasoningItem(message, contentIndex) {
-  const entry = replayEnvelope(message)?.blocks[contentIndex]
-  const item = entry?.type === 'reasoning' ? entry.item : undefined
-  return item?.type === 'reasoning' && typeof item.encrypted_content === 'string' && item.encrypted_content
-    ? item
-    : undefined
-}
-
-function responsesInput(options, imageParts) {
-  const input = []
-  const system = typeof options.system === 'string' && options.system ? options.system : undefined
-  if (system) input.push({ role: 'system', content: system })
-  for (const message of options.messages ?? []) {
-    const role = message.role === 'assistant' ? 'assistant' : message.role === 'system' ? 'system' : 'user'
-    const toolCalls = (message.content ?? []).filter(block => block?.type === 'tool-call')
-    const toolResults = (message.content ?? []).filter(block => block?.type === 'tool-result')
-    if (toolResults.length) {
-      for (const block of toolResults) {
-        input.push({
-          type: 'function_call_output',
-          call_id: block.toolCallId ?? block.id,
-          output: textOf(block.content),
-        })
-      }
-      continue
-    }
-    if (role === 'assistant' && toolCalls.length) {
-      const content = message.content ?? []
-      for (let index = 0; index < content.length; index++) {
-        const block = content[index]
-        if (block?.type === 'reasoning') {
-          const item = replayReasoningItem(message, index)
-          if (item) input.push(item)
-          continue
-        }
-        if (block?.type !== 'tool-call') continue
-        input.push({
-          type: 'function_call',
-          call_id: block.id,
-          name: block.name,
-          arguments: typeof block.arguments === 'string' ? block.arguments : JSON.stringify(block.arguments ?? {}),
-        })
-      }
-      const text = textOf(message.content)
-      if (text) input.push({ role: 'assistant', content: text })
-      continue
-    }
-    // User turns carrying images become the Responses API content-part array.
-    const hasImage = (message.content ?? []).some(block => block?.type === 'image')
-    if (role === 'user' && hasImage) {
-      const parts = imageContentParts(message.content, imageParts)
-      if (parts.length > 0) input.push({ role, content: parts })
-      continue
-    }
-    if (role === 'assistant') {
-      const content = message.content ?? []
-      const output = []
-      let text = ''
-      for (let index = 0; index < content.length; index++) {
-        const block = content[index]
-        if (block?.type === 'reasoning') {
-          const item = replayReasoningItem(message, index)
-          if (item) output.push(item)
-        } else if (block?.type === 'text' && block.text) {
-          text += block.text
-        }
-      }
-      if (text) output.push({ role: 'assistant', content: text })
-      input.push(...output)
-      continue
-    }
-    const text = textOf(message.content)
-    // Skip empty turns so a prior wipe / reasoning-only assistant does not poison replay.
-    if (!text) continue
-    input.push({ role, content: text })
-  }
-  return input
-}
-
-function mapFinish(reason) {
-  if (reason === 'toolUse' || reason === 'tool_calls') return { kind: 'tool-calls' }
-  if (reason === 'length' || reason === 'max_tokens') return { kind: 'max-tokens' }
-  return { kind: 'stop' }
-}
-
-/** Numbers only when they can survive a JSON round trip. */
-function finiteOr(value, fallback) {
-  return typeof value === 'number' && Number.isFinite(value) ? value : fallback
-}
-
-/**
- * Drop everything the host refuses to persist (`undefined`, non-finite numbers,
- * functions, symbols) from an outgoing chunk. DSH aborts the whole turn when a
- * single stream chunk is not losslessly JSON-serializable, and that surfaces to
- * the user as a silent "no reply", so this is the last line of defence.
- */
-function jsonSafeChunk(value) {
-  if (value === null) return null
-  const type = typeof value
-  if (type === 'string' || type === 'boolean') return value
-  if (type === 'number') return Number.isFinite(value) && !Object.is(value, -0) ? value : undefined
-  if (type !== 'object') return undefined
-  if (Array.isArray(value)) {
-    const list = []
-    for (const item of value) {
-      const safe = jsonSafeChunk(item)
-      if (safe !== undefined) list.push(safe)
-    }
-    return list
-  }
-  const out = {}
-  for (const [key, item] of Object.entries(value)) {
-    const safe = jsonSafeChunk(item)
-    if (safe !== undefined) out[key] = safe
-  }
-  return out
-}
-
-async function* streamResponsesUnsafe(options, token) {
-  const headers = {
-    Accept: 'text/event-stream',
-    'Content-Type': 'application/json',
-    ...buildProxyHeaders(token),
-  }
-  try {
-    const llm = await optionalImport('@deepseek-ai/dsh-llm')
-    if (typeof llm?.attributionHeaders === 'function') Object.assign(headers, llm.attributionHeaders())
-  } catch {
-    // Host attribution is optional for this MVP fallback adapter.
-  }
-  const body = {
-    model: options.model,
-    input: responsesInput(options, await collectImageParts(options, options.resolveAttachments)),
-    stream: true,
-    // grok-4.7 returns ciphertext by default, but naming it keeps replay explicit
-    // for every reasoning model on this proxy.
-    include: ['reasoning.encrypted_content'],
-  }
-  const cacheKey = promptCacheKey(options)
-  if (cacheKey) body.prompt_cache_key = cacheKey
-  if (typeof options.maxTokens === 'number') body.max_output_tokens = options.maxTokens
-  if (typeof options.temperature === 'number') body.temperature = options.temperature
-  const tools = cacheStableTools(options.tools)
-  if (tools.length) body.tools = tools
-  if (options.reasoningEffort) body.reasoning = { effort: options.reasoningEffort }
-
-  const response = await fetch(RESPONSES_URL, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(body),
-    redirect: 'error',
-    signal: options.signal,
-  })
-  if (!response.ok) {
-    const error = new Error(`Grok Build proxy returned HTTP ${response.status}`)
-    error.status = response.status
-    throw error
-  }
-  if (!response.body) throw new Error('Grok Build proxy returned an empty body')
-
-  const decoder = new TextDecoder()
-  let buffer = ''
-  let textIndex
-  let reasoningIndex
-  let textContent = ''
-  let reasoningContent = ''
-  let nextIndex = 0
-  const emittedBlocks = []
-  const toolBlocks = new Map()
-  // The arguments.delta event carries no `name`; it is announced on
-  // output_item.added / function_call_arguments.done, so remember it by call id.
-  const toolNames = new Map()
-  let usage
-  let finish = { kind: 'stop' }
-
-  const toolIdOf = payload => {
-    const id = payload?.item_id ?? payload?.call_id ?? payload?.id
-    return typeof id === 'string' && id ? id : undefined
-  }
-
-  const learnToolName = (id, name) => {
-    if (typeof id !== 'string' || !id || typeof name !== 'string' || !name) return
-    toolNames.set(id, name)
-    const tool = toolBlocks.get(id)
-    if (tool) tool.name = name
-  }
-
-  const adoptToolArguments = (id, value) => {
-    if (typeof id !== 'string' || typeof value !== 'string' || !value) return
-    const tool = toolBlocks.get(id)
-    if (tool && value.length > tool.arguments.length) tool.arguments = value
-  }
-
-  const flushSse = function* (raw) {
-    const lines = raw.split('\n')
-    let event = 'message'
-    const data = []
-    for (const line of lines) {
-      if (line.startsWith('event:')) event = line.slice(6).trim()
-      else if (line.startsWith('data:')) data.push(line.slice(5).trim())
-    }
-    const payloadText = data.join('\n')
-    if (!payloadText || payloadText === '[DONE]') return
-    let payload
-    try {
-      payload = JSON.parse(payloadText)
-    } catch {
-      return
-    }
-    const type = payload.type ?? event
-    if (type === 'response.output_text.delta' || type === 'response.text.delta') {
-      const delta = payload.delta ?? payload.text ?? ''
-      if (!delta) return
-      if (textIndex === undefined) {
-        textIndex = nextIndex++
-        emittedBlocks[textIndex] = { type: 'text' }
-        yield { type: 'block-start', index: textIndex, blockType: 'text' }
-      }
-      textContent += delta
-      yield { type: 'text-delta', index: textIndex, text: String(delta) }
-      return
-    }
-    if (
-      type === 'response.reasoning_text.delta'
-      || type === 'response.reasoning.delta'
-      || type === 'response.reasoning_summary_text.delta'
-    ) {
-      const delta = payload.delta ?? payload.text ?? ''
-      if (!delta) return
-      if (reasoningIndex === undefined) {
-        reasoningIndex = nextIndex++
-        emittedBlocks[reasoningIndex] = { type: 'reasoning' }
-        yield { type: 'block-start', index: reasoningIndex, blockType: 'reasoning' }
-      }
-      reasoningContent += delta
-      yield { type: 'reasoning-delta', index: reasoningIndex, text: String(delta) }
-      return
-    }
-    if (type === 'response.output_item.added' || type === 'response.output_item.done') {
-      const item = payload.item
-      if (item?.type === 'reasoning' && typeof item.encrypted_content === 'string' && item.encrypted_content) {
-        if (reasoningIndex === undefined) {
-          reasoningIndex = nextIndex++
-          emittedBlocks[reasoningIndex] = { type: 'reasoning' }
-          yield { type: 'block-start', index: reasoningIndex, blockType: 'reasoning' }
-        }
-        emittedBlocks[reasoningIndex] = { type: 'reasoning', item }
-      }
-      if (item?.type === 'function_call') {
-        learnToolName(item.id, item.name)
-        learnToolName(item.call_id, item.name)
-        adoptToolArguments(item.id, item.arguments)
-      }
-      return
-    }
-    if (type === 'response.function_call_arguments.done') {
-      const id = toolIdOf(payload)
-      learnToolName(id, payload.name)
-      adoptToolArguments(id, payload.arguments)
-      return
-    }
-    if (type === 'response.function_call_arguments.delta') {
-      const id = toolIdOf(payload)
-      if (!id) return
-      let tool = toolBlocks.get(id)
-      if (!tool) {
-        tool = {
-          index: nextIndex++,
-          id,
-          // Never leave this undefined: an unserializable chunk aborts the turn.
-          name: toolNames.get(id) ?? 'tool',
-          arguments: '',
-        }
-        emittedBlocks[tool.index] = { type: 'tool-call' }
-        toolBlocks.set(id, tool)
-        yield { type: 'block-start', index: tool.index, blockType: 'tool-call' }
-      }
-      const delta = payload.delta ?? payload.arguments ?? ''
-      tool.arguments += delta
-      yield { type: 'tool-call-delta', index: tool.index, id, name: tool.name, argumentsDelta: String(delta) }
-      return
-    }
-    if (type === 'response.completed') {
-      // Recover names/arguments — and any call whose deltas never arrived —
-      // from the terminal snapshot before the finish reason is decided.
-      for (const item of payload.response?.output ?? []) {
-        if (item?.type !== 'function_call') continue
-        learnToolName(item.id, item.name)
-        learnToolName(item.call_id, item.name)
-        const id = typeof item.id === 'string' && item.id ? item.id : undefined
-        if (id && !toolBlocks.has(id)) {
-          const tool = { index: nextIndex++, id, name: toolNames.get(id) ?? 'tool', arguments: '' }
-          toolBlocks.set(id, tool)
-          emittedBlocks[tool.index] = { type: 'tool-call' }
-          yield { type: 'block-start', index: tool.index, blockType: 'tool-call' }
-        }
-        adoptToolArguments(id, item.arguments)
-      }
-      const responseUsage = payload.response?.usage ?? payload.usage
-      if (responseUsage) {
-        const details = responseUsage.input_tokens_details ?? responseUsage.prompt_tokens_details ?? {}
-        const cachedTokens = finiteOr(details.cached_tokens, 0)
-        const cacheWriteTokens = finiteOr(details.cache_write_tokens, 0)
-        const promptTotal = finiteOr(
-          responseUsage.input_tokens ?? responseUsage.prompt_tokens,
-          0,
-        )
-        const outputTokens = finiteOr(
-          responseUsage.output_tokens ?? responseUsage.completion_tokens,
-          0,
-        )
-        usage = {
-          // The provider folds cache hits into the prompt count, while DSH's
-          // fields are disjoint: billed input = inputTokens + cacheRead +
-          // cacheWrite. Subtracting is what makes the host's "cache hit" figure
-          // real instead of a permanent 0%. Both cache fields stay numeric so
-          // consumers can always add them up.
-          inputTokens: Math.max(0, promptTotal - cachedTokens - cacheWriteTokens),
-          outputTokens,
-          cacheReadTokens: cachedTokens,
-          cacheWriteTokens,
-        }
-        const reasoningTokens = finiteOr(responseUsage.output_tokens_details?.reasoning_tokens, undefined)
-        if (reasoningTokens !== undefined) usage.reasoningTokens = reasoningTokens
-        usage.totalTokens = finiteOr(responseUsage.total_tokens, promptTotal + outputTokens)
-      }
-      finish = mapFinish(payload.response?.status === 'incomplete' ? 'length' : 'stop')
-      if (toolBlocks.size) finish = { kind: 'tool-calls' }
-    }
-    if (type === 'response.failed' || type === 'error') {
-      const raw = payload.error?.message ?? payload.message
-      const failure = {
-        message: typeof raw === 'string' && raw ? raw : 'Grok Build stream failed',
-        code: 'PROVIDER',
-      }
-      const status = finiteOr(payload.error?.status, undefined)
-      if (status !== undefined) failure.status = status
-      finish = { kind: 'error', failure }
-    }
-  }
-
-  for await (const chunk of response.body) {
-    buffer += decoder.decode(chunk, { stream: true })
-    let separator
-    while ((separator = buffer.indexOf('\n\n')) !== -1) {
-      const raw = buffer.slice(0, separator)
-      buffer = buffer.slice(separator + 2)
-      yield* flushSse(raw)
-    }
-  }
-  if (buffer.trim()) yield* flushSse(buffer)
-
-  if (reasoningIndex !== undefined) {
-    yield { type: 'block-end', index: reasoningIndex, block: { type: 'reasoning', text: reasoningContent } }
-  }
-  if (textIndex !== undefined) {
-    yield { type: 'block-end', index: textIndex, block: { type: 'text', text: textContent } }
-  }
-  for (const tool of toolBlocks.values()) {
-    yield {
-      type: 'block-end',
-      index: tool.index,
-      block: { type: 'tool-call', id: tool.id, name: tool.name ?? 'tool', arguments: tool.arguments },
-    }
-  }
-  if (usage) yield { type: 'usage', usage }
-  const finishChunk = { type: 'finish', reason: finish }
-  if (finish.kind !== 'error' && finish.kind !== 'aborted' && emittedBlocks.length === nextIndex) {
-    finishChunk.replayState = {
-      response: { kind: REPLAY_KIND, version: REPLAY_VERSION },
-      blocks: emittedBlocks,
-    }
-  }
-  yield finishChunk
-}
-
-/**
- * Responses SSE stream translated into host chunks, guaranteed to be free of
- * values the host cannot persist. The host rejects the whole turn otherwise.
- */
-export async function* streamResponses(options, token) {
-  for await (const chunk of streamResponsesUnsafe(options, token)) {
-    const safe = jsonSafeChunk(chunk)
-    if (safe) yield safe
-  }
-}
 
 /**
  * Models exposed to PiAiAdapter.listModels via provider.getModels().
@@ -745,101 +250,6 @@ export function visiblePiModels(session) {
   ))
 }
 
-function createDuckAdapter(session, adapterOptions = {}) {
-  const providerInfo = () => ({ id: PROVIDER_ID, name: DISPLAY_NAME })
-  const list = () => {
-    const signedIn = session.publicAccount()?.signedIn === true
-    return signedIn ? toLlmModels(session.models()) : []
-  }
-  return {
-    providerInfo,
-    providerRetryPolicy() { return undefined },
-    async listModels(provider) {
-      if (provider !== PROVIDER_ID) return []
-      return list()
-    },
-    async resolveModel(provider, model) {
-      const found = list().find(item => item.id === model)
-      const raw = session.publicAccount()?.signedIn === true
-        ? session.models().find(item => item.id === model)
-        : undefined
-      const info = {
-        provider,
-        id: model,
-        name: found?.name ?? model,
-        // The host gates prompt attachment admission on resolveModelInfo, NOT on
-        // listModels, so this must match the catalog's modality map exactly.
-        inputModalities: supportsImageInput(model) ? ['text', 'image'] : ['text'],
-        context: { contextWindow: raw?.contextWindow ?? 500_000 },
-      }
-      const reasoning = reasoningInfoOf(raw)
-      if (reasoning) info.reasoning = reasoning
-      else if (found?.reasoning) info.reasoning = found.reasoning
-      return info
-    },
-    async prepareCall(provider, model, signal) {
-      const resolved = await this.resolveModel(provider, model, signal)
-      return {
-        model: resolved,
-        stream: options => this.stream(options),
-      }
-    },
-    async *stream(options) {
-      if (options.provider !== PROVIDER_ID) {
-        yield { type: 'finish', reason: { kind: 'error', failure: { message: 'Unknown provider', code: 'NO_ADAPTER' } } }
-        return
-      }
-      // The host attachment store is supplied by the plugin, not by the caller.
-      const callOptions = typeof adapterOptions.resolveAttachments === 'function'
-        ? { ...options, resolveAttachments: adapterOptions.resolveAttachments }
-        : options
-      let token = await session.currentToken()
-      if (!token) {
-        yield { type: 'finish', reason: { kind: 'error', failure: { message: 'Grok subscription is not signed in', code: 'MISSING_CREDENTIAL' } } }
-        return
-      }
-      // The token is short-lived and the CLI renews it. When the proxy answers
-      // 401 anyway, renew once and retry — but only if nothing was emitted yet,
-      // so a partially streamed answer is never duplicated.
-      for (let attempt = 0; ; attempt++) {
-        let emitted = false
-        try {
-          for await (const chunk of streamResponses(callOptions, token, callOptions.resolveAttachments)) {
-            emitted = true
-            yield chunk
-          }
-          return
-        } catch (error) {
-          const aborted = options.signal?.aborted === true
-          const status = finiteOr(error?.status, undefined)
-          const canRetry = (
-            !aborted
-            && !emitted
-            && attempt === 0
-            && status === 401
-            && typeof session.refreshToken === 'function'
-          )
-          if (canRetry) {
-            const renewed = await session.refreshToken()
-            if (renewed && renewed !== token) {
-              token = renewed
-              continue
-            }
-          }
-          const failure = {
-            message: status === 401
-              ? 'Grok Build session is expired or unauthorized (HTTP 401). Run grok login, then Pull from Grok CLI.'
-              : error instanceof Error ? error.message : 'Grok Build request failed',
-            code: aborted ? 'ABORTED' : status === 401 ? 'UNAUTHORIZED' : 'PROVIDER',
-          }
-          if (status !== undefined) failure.status = status
-          yield { type: 'finish', reason: { kind: aborted ? 'aborted' : 'error', failure } }
-          return
-        }
-      }
-    },
-  }
-}
 
 function createStore(session) {
   return {
@@ -914,38 +324,6 @@ function withGrokRequestSemantics(api) {
   }
 }
 
-function wrapAsHostAdapter(candidate, dshLlm) {
-  if (!dshLlm?.LlmAdapter || candidate instanceof dshLlm.LlmAdapter) return candidate
-  class GrokBuildAdapter extends dshLlm.LlmAdapter {
-    providerInfo(provider) { return candidate.providerInfo(provider) }
-    providerRetryPolicy(provider) { return candidate.providerRetryPolicy(provider) }
-    listModels(provider) { return candidate.listModels(provider) }
-    resolveModel(provider, model, signal) { return candidate.resolveModel(provider, model, signal) }
-    prepareCall(provider, model, signal) { return candidate.prepareCall(provider, model, signal) }
-    stream(options) { return candidate.stream(options) }
-  }
-  return new GrokBuildAdapter()
-}
-
-/**
- * Synchronous duck / host adapter — no dynamic imports of pi-ai or peers.
- * Used so apply() can register immediately and return without wedging the loader.
- */
-export function createGrokBuildAdapterSync(session, options = {}) {
-  const duck = createDuckAdapter(session, { resolveAttachments: options.resolveAttachments })
-  const dshLlm = options.dshLlm
-  return {
-    adapter: wrapAsHostAdapter(duck, dshLlm),
-    kind: 'custom-mvp',
-    note: 'Registered a sync duck Responses adapter; pi-ai upgrade may follow in the background.',
-  }
-}
-
-/** Alias for createGrokBuildAdapterSync (no heavy dynamic imports). */
-export function createDuckHostAdapter(session, options = {}) {
-  return createGrokBuildAdapterSync(session, options)
-}
-
 export async function createGrokBuildAdapter(session, options = {}) {
   const importOpts = options.importOptions ?? {}
   const [piAi, dshPi, dshLlm] = await Promise.all([
@@ -954,13 +332,17 @@ export async function createGrokBuildAdapter(session, options = {}) {
     optionalImport('@deepseek-ai/dsh-llm', importOpts),
   ])
 
-  const duck = createDuckAdapter(session, { resolveAttachments: options.resolveAttachments })
-  const asHostAdapter = candidate => wrapAsHostAdapter(candidate, dshLlm)
+  // This plugin has exactly one adapter path: the host's own. Every DSH install
+  // carries it (`@deepseek-ai/dsh` → `dsh-base` → `dsh-llm-pi-ai` → pi-ai, with
+  // the `llm-pi-ai` row mounted unconditionally), so a missing peer means a
+  // broken or unusual install rather than a host this plugin should work around.
+  // Report it and register nothing: a half-working substitute would hide the
+  // real problem behind subtler symptoms.
   if (!piAi?.createProvider || !dshPi?.PiAiAdapter) {
     return {
-      adapter: asHostAdapter(duck),
-      kind: 'custom-mvp',
-      note: 'PiAiAdapter or @earendil-works/pi-ai is not available in this host; using a documented custom Responses adapter.',
+      adapter: undefined,
+      kind: 'unavailable',
+      note: 'the host pi-ai adapter is unavailable: @earendil-works/pi-ai and @deepseek-ai/dsh-llm-pi-ai must be resolvable from the DSH install',
     }
   }
 
@@ -972,7 +354,11 @@ export async function createGrokBuildAdapter(session, options = {}) {
     responsesApi = undefined
   }
   if (!responsesApi) {
-    return { adapter: asHostAdapter(duck), kind: 'custom-mvp', note: 'openai-responses API module is unavailable; using the custom adapter.' }
+    return {
+      adapter: undefined,
+      kind: 'unavailable',
+      note: 'the pi-ai openai-responses API module is unavailable in this host',
+    }
   }
   // pi-ai only auto-sets include for provider id "xai"; grok-build needs the same
   // encrypted reasoning replay so turn 2+ keeps visible assistant text.
@@ -1078,4 +464,4 @@ export async function createGrokBuildAdapter(session, options = {}) {
   }
 }
 
-export { createDuckAdapter, responsesInput, withGrokRequestSemantics, wrapAsHostAdapter }
+export { withGrokRequestSemantics }

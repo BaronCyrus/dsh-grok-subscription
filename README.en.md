@@ -46,11 +46,7 @@ For DSH setup, see the [official instructions](https://github.com/deepseek-ai/de
 
 ### 1. Install the plugin
 
-```sh
-dsh plugin --profile web add dsh-grok-subscription@latest
-```
-
-Then **manually restart the target DSH instance**. Refreshing the browser alone does not reload the Host adapter.
+In the desktop app open **Settings → Plugins**, type the package name `dsh-grok-subscription` into the install field, and install it. Then **quit and restart the desktop app completely**: refreshing the page alone does not reload the Host adapter.
 
 ### 2. Sign in
 
@@ -63,19 +59,18 @@ Open **Settings → Grok Subscription** and select **CLI login** or **Device-cod
 Pick a Grok model your account can use, adjust reasoning effort as needed, and start chatting or coding. The badge beside the model shows weekly quota when usage can be read successfully.
 
 <details>
-<summary>Verify the install / use npx / pin a version</summary>
+<summary>Check the version / pin one / fall back when the UI install fails</summary>
+
+**Settings → Plugins** lists the installed plugins and their versions, and the plugin's own **Settings → Grok Subscription** page shows a version card. To pin a version, put the full `package@version` in the install field, for example `dsh-grok-subscription@2.0.0`.
+
+If the UI install fails (an unusual profile directory, say), the equivalent runs against the desktop profile itself (pnpm ≥ 11):
 
 ```sh
-dsh plugin --profile web list dsh-grok-subscription --depth 0
+cd "$HOME/.dsh/profiles/desktop"    # Windows: cd "$env:USERPROFILE\.dsh\profiles\desktop"
+pnpm add --save-exact --config.minimumReleaseAge=0 dsh-grok-subscription@2.0.0
 ```
 
-Without a global `dsh` command, retain your full `npx` launcher prefix. This example uses the baseline version declared in the package metadata:
-
-```sh
-npx -y @deepseek-ai/dsh@0.1.5-rc.2 plugin --profile web add dsh-grok-subscription@latest
-```
-
-See the [full user guide](docs/guide.en.md) for pinned npm versions, GitHub-source installs, CLI paths, and Headless usage.
+`dsh plugin --profile desktop …` is refused: the Electron application owns that profile exclusively. CLI paths, sign-in, and troubleshooting are in the [full user guide](docs/guide.en.md).
 
 </details>
 
@@ -116,27 +111,17 @@ Identity and time values in the account screenshot are demo data. Usage screensh
 
 ## User guide
 
-The [full user guide](docs/guide.en.md) covers CLI sign-in, the model catalog, images, quota limitations, network troubleshooting, Headless usage, and development.
+The [full user guide](docs/guide.en.md) covers installation and compatibility, CLI sign-in, the model catalog, images, quota limitations, network troubleshooting, and development.
 
 Quick links: [Sign-in and credentials](docs/guide.en.md#sign-in-and-credentials) · [Image input](docs/guide.en.md#image-input) · [Troubleshooting](docs/guide.en.md#troubleshooting) · [Contributing](CONTRIBUTING.md).
 
 ## Update and uninstall
 
-**Update an npm installation:** check versions in Settings. Supported npm installs can update there, or you can run:
-
-```sh
-dsh plugin --profile web add dsh-grok-subscription@latest
-```
-
-For a GitHub-source install, use `dsh plugin --profile web update dsh-grok-subscription`. For a local `link:` install, pull and rebuild the checkout instead of replacing its development link.
+**Update:** put `dsh-grok-subscription` (or `dsh-grok-subscription@version`) into the **Settings → Plugins** install field again to install over the current copy; the plugin's own page also has a version card and an **Update plugin** button. Then **quit and restart the desktop app completely**.
 
 The desktop app owns its `desktop` profile exclusively, so `dsh plugin --profile desktop …` is refused there. The desktop **Update plugin** button therefore installs the exact version inside that profile directory with DSH's own bundled pnpm; before `1.1.1` that button always failed in the desktop app. Manual steps: [Updates and sign-out](docs/guide.en.md#updates-and-sign-out).
 
-**Uninstall:**
-
-```sh
-dsh plugin --profile web remove dsh-grok-subscription
-```
+**Uninstall:** remove `dsh-grok-subscription` in **Settings → Plugins**, or run `pnpm remove dsh-grok-subscription` in that profile directory, then restart the desktop app. Uninstalling leaves other plugins, the profile, and the CLI's `auth.json` intact, and is not the same as signing out of the official CLI; see [Updates and sign-out](docs/guide.en.md#updates-and-sign-out).
 
 Restart DSH afterwards. Removal does not delete other plugins, the whole profile, or the CLI's `auth.json`; it is not the same as signing out of the official CLI. See [Updates and sign-out](docs/guide.en.md#updates-and-sign-out).
 
@@ -148,7 +133,7 @@ Restart DSH afterwards. Removal does not delete other plugins, the whole profile
 
 **Sign-in or requests time out?** Check connectivity from the DSH host to account and subscription services, including its launch-time proxy settings. Network issues, authentication, or service errors can cause failures; do not assume the quota is exhausted. See [Troubleshooting](docs/guide.en.md#troubleshooting).
 
-**Images still unavailable after updating?** Fully restart DSH, check the model's image support, and check the attachment capability shown under **Active path** in Settings.
+**Images still unavailable after updating?** Fully restart the desktop app, check the model's image support, and check that **Active path** in Settings reads **official pi-ai** with attachment capability available. An **unavailable** row means the host has no pi-ai adapter.
 
 ## Scope and support
 

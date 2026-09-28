@@ -6,37 +6,20 @@
 
 ## 安装与兼容性
 
-需要 DeepSeek Harness、官方 Grok Build CLI，以及当前具有 Grok Build 使用资格的订阅账号。插件的 Node.js 要求为 `^22.19.0 || >=24.0.0`，DSH peer 声明以 [package.json](../package.json) 为准；其中 DSH 依赖使用 `>=0.1.5-rc.2 <0.3.0-0`，覆盖 0.1 与 0.2 全线。声明范围不等于所有版本都已经过实机验证。
+需要 DeepSeek Harness 桌面版、官方 Grok Build CLI，以及当前具有 Grok Build 使用资格的订阅账号。插件的 Node.js 要求为 `^22.19.0 || >=24.0.0`，DSH peer 声明以 [package.json](../package.json) 为准；其中 DSH 依赖使用 `>=0.1.5-rc.2 <0.3.0-0`，覆盖 0.1 与 0.2 全线。声明范围不等于所有版本都已经过实机验证。
 
-**npm 安装：**
+**安装：** 在桌面版打开 **设置 → 插件**，在安装输入框里填入包名 `dsh-grok-subscription` 并安装，然后**完全退出并重启桌面应用**。仅刷新页面不会重新加载 Host 中的适配器。需要可重复安装时，填入完整的 `包名@版本`，例如 `dsh-grok-subscription@2.0.0`。
 
-```sh
-dsh plugin --profile web add dsh-grok-subscription@latest
-dsh plugin --profile web list dsh-grok-subscription --depth 0
-```
+**插件依赖宿主自带的 pi-ai 适配器。** 从 2.0.0 起，`grok-build` 路由完全由宿主的 `@deepseek-ai/dsh-llm-pi-ai` / `@earendil-works/pi-ai` 服务；DSH 的任何安装方式都带有它们（`@deepseek-ai/dsh` → `dsh-base` → `dsh-llm-pi-ai`，且 `llm-pi-ai` 行无条件挂载）。这两个包无法从 DSH 安装目录解析时，插件不会注册任何路由，设置页的「运行通路」显示**不可用**。
 
-需要可重复安装时，固定已发布版本，例如：
+界面安装失败时（例如 profile 目录权限异常），可以对桌面版 profile 手动执行等价操作（pnpm ≥ 11）：
 
 ```sh
-dsh plugin --profile web add dsh-grok-subscription@1.2.0
+cd "$HOME/.dsh/profiles/desktop"    # Windows: cd "$env:USERPROFILE\.dsh\profiles\desktop"
+pnpm add --save-exact --config.minimumReleaseAge=0 dsh-grok-subscription@2.0.0
 ```
 
-**GitHub 来源安装：**
-
-```sh
-dsh plugin --profile web add BaronCyrus/dsh-grok-subscription
-```
-
-GitHub 分支与 npm 发布版本可能不同；请明确选择安装来源，不要把某个源码提交当作已经发布的 npm 版本。
-
-如果 DSH 通过 `npx` 运行、没有全局 `dsh` 命令，插件操作也需要完整前缀。下面以包声明的基线版本为例：
-
-```sh
-npx -y @deepseek-ai/dsh@0.1.5-rc.2 plugin --profile web add dsh-grok-subscription@latest
-npx -y @deepseek-ai/dsh@0.1.5-rc.2 plugin --profile web list dsh-grok-subscription --depth 0
-```
-
-安装后手动重启目标 DSH。需要进一步检查时，在本机运行 `dsh --profile web --dump-config`，确认只有一个 `grok-build` 路由；分享诊断前先隐藏敏感配置与个人路径，不要公开整份配置。
+`dsh plugin --profile desktop …` 会被直接拒绝：桌面版 profile 由 Electron 应用独占。
 
 ## 登录与凭据
 
@@ -64,7 +47,7 @@ chmod 600 "${GROK_HOME:-$HOME/.grok}/auth.json"
 
 推理档位按模型元数据提供。当前实现识别 `low` / `medium` / `high` / `xhigh`，通常默认 `high`；内置 `grok-4.5` 目录只包含前三档。以实际菜单与服务端接受的选项为准。实现见 [catalog.js](../src/catalog.js)。
 
-登录、拉取、登出和目录刷新会通知模型选择器更新。临近已知的 token 到期时间或遇到认证拒绝时，插件会尝试通过官方 CLI 续期；若失败，仍可能需要重新授权，不承诺会话永不失效。
+登录、拉取、登出和目录刷新会通知模型选择器更新。临近已知的 token 到期时间时，插件会通过官方 CLI 续期；若续期失败或服务端已撤销会话，仍需要重新授权，不承诺会话永不失效。
 
 ## 图片输入
 
@@ -80,7 +63,7 @@ grok-4.6
 
 在输入框粘贴或附加图片后，DSH 的附件服务会按像素与体积预算处理。图片超出可用预算时可能降级为文本说明；不要假设每张原图都以原始分辨率发出。
 
-1.2.0 起，插件默认运行宿主官方的 pi-ai 适配器，图片通路（附件解析与像素、体积预算）由它负责。内置适配器保留为自动回退：pi-ai 相关包缺失、或宿主拒绝交接时，仍由它服务该路由。设置页的 **运行通路** 会显示实际在服务的适配器和图片输入是否可用。更新后只有界面刷新、Host 未重启时，可能仍运行旧适配器。若要主动固定在内置适配器（例如宿主适配器在你的账号上表现异常），在 `~/.dsh/.env` 里设置 `DSH_GROK_ADAPTER=fallback` 并重启 DSH。
+`grok-build` 路由由宿主官方的 pi-ai 适配器服务，图片通路（附件解析、像素与体积预算）也由它负责。设置页的 **运行通路** 会显示适配器是否在服务，以及图片输入是否可用；显示**不可用**时说明宿主缺少 pi-ai 适配器。更新后只有界面刷新、Host 未重启时，可能仍在运行旧版本。
 
 ## 额度与缓存
 
@@ -88,27 +71,9 @@ grok-4.6
 
 输入框徽章仅在当前 provider 为 `grok-build` 且用量读取成功时显示，悬停或点击查看每周余量与重置时间。缺失数据不是额度为零；读取失败不会编造百分比，也不会因为单独的额度读取故障阻止聊天。
 
-前缀缓存方面，插件在**两条通路**上都为同一 DSH 会话固定同一个 `prompt_cache_key`：内置适配器自行构造，宿主 pi-ai 通路上插件把同样的 `grok:<sessionId>` 注入请求；工具顺序保持稳定。压缩、会话标题这类辅助请求与会话共用同一个 key，而不是另开一个——对代理实测下来，隔离它们并不会提高聊天前缀的缓存命中。这些是请求构造措施，不保证服务端缓存命中或节省额度；项目不提供虚构的命中率。实现见 [adapter.js](../src/adapter.js)。
-
-## Headless 使用
-
-先在同一主机上完成 Grok CLI 订阅登录，并验证 Web 中可正常使用。然后把插件安装到目标 Headless profile：
-
-```sh
-dsh plugin --profile headless add dsh-grok-subscription@latest
-```
-
-确认该 profile 的模型配置确实选择了 `grok-build` 下你有权使用的模型，再执行一次性交互任务：
-
-```sh
-dsh --profile headless "只回复：ok"
-```
-
-这条任务命令会发起真实模型调用并使用所选服务的额度；它不是离线检查。Web 中选择模型，不应被当作另一个 profile 已正确配置的证明。
+前缀缓存方面，插件为同一 DSH 会话固定同一个 `prompt_cache_key`（`grok:<sessionId>`），并在请求里显式写入，工具顺序保持稳定。压缩、会话标题这类辅助请求与会话共用同一个 key，而不是另开一个——对代理实测下来，隔离它们并不会提高聊天前缀的缓存命中。这些是请求构造措施，不保证服务端缓存命中或节省额度；项目不提供虚构的命中率。实现见 [adapter.js](../src/adapter.js)。
 
 ## 故障排查
-
-**找不到 `dsh`。** 使用你运行 DSH 时的完整 `npx` 前缀，或检查已安装启动器的命令路径。
 
 **找不到 `grok` / 不弹出登录窗口。** 检查 CLI 是否安装在 DSH Host、`DSH_GROK_BIN` / `PATH` 是否对该进程可见，以及面板是否已显示可点击授权链接。浏览器没有弹出，不一定等于授权服务不可达。Windows 上若 CLI 不在 `PATH` 中，可把 `grok.exe` 的绝对路径写入用户级 `DSH_GROK_BIN`（例如 `setx DSH_GROK_BIN "C:\Users\<用户>\.grok\bin\grok.exe"`），再完全重启 DSH；注意 `DSH_*` 是 DSH 的 bootstrap 前缀，写进 `~/.dsh/.env` 会让该环境层直接报错。
 
@@ -118,28 +83,30 @@ dsh --profile headless "只回复：ok"
 
 **聊天或用量返回 `401`。** 检查 CLI 会话是否有效。自动续期失败时，重新运行 `grok login`，完成授权后再次拉取。不要反复粘贴旧 token。
 
-**图片被拒绝。** 对照图片支持列表，检查「运行通路」的附件能力，并在更新后完整重启 Host，再刷新网页。
+**图片被拒绝。** 对照图片支持列表，确认设置页「运行通路」显示**官方 pi-ai** 且附件能力可用，并在更新后完整重启桌面应用。
 
 **文件权限错误。** 检查 auth 文件的真实路径、所有者、是否为符号链接以及权限；`chmod 600` 仅解决权限位问题。
 
 **旧版本发消息无回复。** `1.0.0` 存在已在 `1.0.1` 修正的工具调用序列化问题；旧版本也可能缺少后续续期修复。先更新到当前发布版，再定位仍然存在的问题，不要把所有无回复都归因于旧缺陷。
 
-**DSH 更新后插件从设置页消失。** 0.2.0 起，插件的 `@deepseek-ai/dsh*` peer 范围若不包含当前运行版本，DSH 会在加载任何插件代码之前丢掉整个 bundle：既没有 `grok-build` 路由，也没有设置分区，界面里没有任何提示。Host 自己的 stderr 会输出 `skipping profile bundle "dsh-grok-subscription"`，`dsh --profile web --dump-config` 里也不会出现 `grok-subscription` 行。此时应更新插件，而不是授予版本豁免——豁免会重新启用一个从未针对该 Host 验证过的构建。
+**DSH 更新后插件从设置页消失。** 0.2.0 起，插件的 `@deepseek-ai/dsh*` peer 范围若不包含当前运行版本，DSH 会在加载任何插件代码之前丢掉整个 bundle：既没有 `grok-build` 路由，也没有设置分区，界面里没有任何提示。Host 自己的 stderr 会输出 `skipping profile bundle "dsh-grok-subscription"`（桌面版不允许通过 `dsh --profile desktop --dump-config` 检查，以这行日志为准）。此时应更新插件，而不是授予版本豁免——豁免会重新启用一个从未针对该 Host 验证过的构建。
+
+**「运行通路」显示不可用。** 说明宿主缺少 pi-ai 适配器：`@earendil-works/pi-ai` 或 `@deepseek-ai/dsh-llm-pi-ai` 无法从 DSH 安装目录解析。确认 DSH 安装完整、没有手工裁剪 `node_modules`，然后完全重启桌面应用。
 
 ## 更新与登出
 
-npm 安装可在设置页更新，或运行 `dsh plugin --profile web add dsh-grok-subscription@latest`。GitHub 来源安装可运行 `dsh plugin --profile web update dsh-grok-subscription`。本地链接安装则拉取对应 checkout、测试并构建。更新后手动重启 DSH。
+**更新：** 在 **设置 → 插件** 的安装框里重新填入 `dsh-grok-subscription`（或 `dsh-grok-subscription@版本`）安装即可覆盖；插件自己的设置页也有版本卡片与「更新插件」按钮。完成后**完全退出并重启桌面应用**。
 
-桌面版的 `desktop` profile 由 Electron 应用独占，`dsh plugin --profile desktop …` 会被直接拒绝（`profile "desktop" is managed exclusively by the Electron application`），所以桌面版只能由插件自己更新。1.1.1 起「更新插件」会在该 profile 目录中用 DSH 自带的 pnpm 安装精确版本；若你仍停留在旧版本且按钮报错，可在终端手动执行（pnpm 需 ≥ 11）：
+桌面版的 `desktop` profile 由 Electron 应用独占，`dsh plugin --profile desktop …` 会被直接拒绝（`profile "desktop" is managed exclusively by the Electron application`），因此桌面版的更新由插件在该 profile 目录中用 DSH 自带的 pnpm 安装精确版本。1.1.1 之前插件自己的按钮在桌面版必然失败；界面安装失败时也可以在终端手动执行（pnpm 需 ≥ 11）：
 
 ```sh
 cd "$HOME/.dsh/profiles/desktop"    # Windows: cd "$env:USERPROFILE\.dsh\profiles\desktop"
-pnpm add --save-exact dsh-grok-subscription@1.2.0
+pnpm add --save-exact --config.minimumReleaseAge=0 dsh-grok-subscription@2.0.0
 ```
 
 然后完全退出并重启桌面版。更新成功后该 profile 的 `package.json` 里依赖应变为目标版本，`dsh.profile.bundles` 条目保持不变。仅刷新网页不够：Host 未重启时仍会加载旧版本。
 
-卸载使用 `dsh plugin --profile web remove dsh-grok-subscription`。这不删除整个 profile、其他插件或 Grok CLI 的 `auth.json`。
+**卸载：** 在 **设置 → 插件** 里移除 `dsh-grok-subscription`，或在该 profile 目录执行 `pnpm remove dsh-grok-subscription`。这不删除整个 profile、其他插件或 Grok CLI 的 `auth.json`。
 
 设置页「登出」清理的是插件侧会话状态，不等于撤销官方 CLI 会话。CLI 文件仍然存在时，之后重新拉取或启动可能再次同步登录；彻底结束官方会话应使用官方 CLI / 账号提供的登出与授权管理流程。不要靠删除整个 DSH profile 来处理一个账号。
 

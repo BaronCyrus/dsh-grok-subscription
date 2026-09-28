@@ -126,14 +126,26 @@ function Chip({ tone = 'off', children }) {
   return <span className={`gsChip gsChip--${tone}`}><span className="gsDot" />{children}</span>
 }
 
+/**
+ * The states the provider route can be in, in the panel's own words. `starting`
+ * is what a freshly applied plugin reports until its deferred registration
+ * lands; an unrecognized value is shown verbatim rather than mislabelled.
+ */
+const ADAPTER_LABELS = {
+  'pi-ai': 'adapterPiAi',
+  unavailable: 'adapterUnavailable',
+  starting: 'adapterStarting',
+}
+
 export function DiagnosticsRows({ diagnostics, t }) {
   if (!diagnostics) return null
+  const adapterKey = ADAPTER_LABELS[diagnostics.adapter]
   return (
     <div className="gsRows">
       <div className="gsRow">
         <span>{t('diagnostics')}</span>
         <span className="gsRowValue">
-          {diagnostics.adapter === 'pi-ai' ? t('adapterPiAi') : t('adapterFallback')}
+          {adapterKey ? t(adapterKey) : diagnostics.adapter}
         </span>
       </div>
       <div className="gsRow">

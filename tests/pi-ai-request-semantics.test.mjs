@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { withGrokRequestSemantics } from '../src/adapter.js'
+import { promptCacheKey, withGrokRequestSemantics } from '../src/adapter.js'
 
 /** Captures the pi-ai options the wrapper hands on. */
 function recordingApi() {
@@ -71,4 +71,14 @@ test('the pinned key stays the chat key, because pi-ai never receives a purpose'
   // request still read the full prefix in 4 of 5 shared-key trials against 2 of
   // 5 isolated ones, and a control run with no auxiliary call at all read the
   // same full prefix. Sharing is at worst neutral, so this path keeps it.
+})
+
+test('promptCacheKey describes the pinned key format', () => {
+  // The key the wrapper pins; kept independent of the transport so the format
+  // cannot drift silently.
+  assert.equal(promptCacheKey({ sessionId: 'session-123' }), 'grok:session-123')
+  assert.equal(promptCacheKey({ sessionId: 'session-123', purpose: 'compaction' }), 'grok:compaction:session-123')
+  assert.equal(promptCacheKey({}), undefined)
+  assert.equal(promptCacheKey({ sessionId: '   ' }), undefined)
+  assert.equal(promptCacheKey({ sessionId: 'x'.repeat(80) }).length, 64)
 })

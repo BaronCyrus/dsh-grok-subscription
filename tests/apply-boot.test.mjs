@@ -42,24 +42,15 @@ function fakeCtx() {
   }
 }
 
-test('apply registers duck adapter sync and returns without awaiting hanging upgrade import', async () => {
+test('apply returns before the adapter import settles, and never blocks on it', async () => {
   const ctx = fakeCtx()
-  let upgradeStarted = 0
+  let buildStarted = 0
   let deferredRuns = 0
 
   const started = Date.now()
   apply(ctx, {
-    createSync: session => ({
-      adapter: {
-        listModels: async () => [],
-        providerInfo: () => ({ id: PROVIDER_ID, name: 'test' }),
-      },
-      kind: 'custom-mvp',
-      note: 'test-duck',
-      session,
-    }),
-    createAsync: async () => {
-      upgradeStarted += 1
+    buildAdapter: async () => {
+      buildStarted += 1
       return neverResolves()
     },
     defer: run => {
@@ -74,36 +65,36 @@ test('apply registers duck adapter sync and returns without awaiting hanging upg
 
   assert.ok(elapsed < 50, `apply should return immediately, took ${elapsed}ms`)
   assert.equal(deferredRuns, 1)
-  assert.ok(ctx._adapters.has(PROVIDER_ID), 'duck adapter registered synchronously')
+  assert.equal(ctx._adapters.size, 0, 'no route is claimed before the deferred tick')
   assert.equal(ctx._providers.length, 0, 'configurable providers deferred')
-  assert.equal(upgradeStarted, 0, 'upgrade must not start before deferred tick')
+  assert.equal(buildStarted, 0, 'the adapter import must not start before the deferred tick')
 
   await waitMs(30)
-  assert.equal(upgradeStarted, 1, 'upgrade kicked on deferred tick')
+  assert.equal(buildStarted, 1, 'the adapter build kicked on the deferred tick')
   assert.equal(ctx._providers.length, 1)
   assert.equal(ctx._providers[0].provider, PROVIDER_ID)
-  // Still no hang: hanging upgrade must not block further progress.
+  // A hanging import must not wedge anything else: apply already returned and
+  // the plugin list has rendered.
   await waitMs(20)
-  assert.ok(ctx._adapters.has(PROVIDER_ID))
+  assert.equal(ctx._adapters.size, 0, 'an unresolved adapter never claims the route')
 })
 
-test('apply soft-gets credentials and never requires inject listing', async () => {
-  const ctx = fakeCtx()
-  let seenCredentials
+test('apply tolerates a host without the credentials service', async () => {
+  const ctx = fakeCtx() // get('credentials') -> undefined
+  const deferred = []
+  let seenSession
   apply(ctx, {
-    createSync: session => {
-      seenCredentials = session
-      return {
-        adapter: { listModels: async () => [] },
-        kind: 'custom-mvp',
-      }
+    buildAdapter: async session => {
+      seenSession = session
+      return { adapter: { listModels: async () => [] }, kind: 'pi-ai' }
     },
     skipSettings: true,
     skipPull: true,
-    skipUpgrade: true,
-    defer: () => {},
+    defer: run => deferred.push(run),
   })
-  assert.ok(seenCredentials, 'session created')
+  for (const run of deferred.splice(0)) run()
+  await waitMs(10)
+  assert.ok(seenSession, 'the plugin still builds its adapter without a credentials service')
   assert.ok(ctx._adapters.has(PROVIDER_ID))
 })
 
@@ -111,23 +102,21 @@ test('inject stays lean (llm+web only)', () => {
   assert.deepEqual(pluginInject, ['llm', 'web'])
 })
 
-test('apply defers llm/adapters-updated emit (never sync during apply)', async () => {
+test('apply never emits llm/adapters-updated synchronously', async () => {
   const ctx = fakeCtx()
   let emits = 0
   ctx.emit = () => { emits += 1 }
+  const deferred = []
 
   apply(ctx, {
-    createSync: () => ({
-      adapter: { listModels: async () => [] },
-      kind: 'custom-mvp',
-    }),
+    buildAdapter: async () => ({ adapter: { listModels: async () => [] }, kind: 'pi-ai' }),
     skipSettings: true,
     skipPull: true,
-    skipUpgrade: true,
-    defer: () => {},
+    defer: run => deferred.push(run),
   })
 
   assert.equal(emits, 0, 'emit must not run synchronously inside apply')
-  await new Promise(resolve => setImmediate(resolve))
-  assert.equal(emits, 1, 'emit runs on deferred tick')
+  for (const run of deferred.splice(0)) run()
+  await waitMs(10)
+  assert.equal(emits, 1, 'the deferred registration announces the new route once')
 })
