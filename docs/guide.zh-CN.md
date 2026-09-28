@@ -18,7 +18,7 @@ dsh plugin --profile web list dsh-grok-subscription --depth 0
 需要可重复安装时，固定已发布版本，例如：
 
 ```sh
-dsh plugin --profile web add dsh-grok-subscription@1.0.20
+dsh plugin --profile web add dsh-grok-subscription@1.1.0
 ```
 
 **GitHub 来源安装：**

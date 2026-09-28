@@ -1,6 +1,6 @@
 {
   "name": "dsh-grok-subscription",
-  "version": "1.0.20",
+  "version": "1.1.0",
   "description": "Use a SuperGrok or X Premium Grok Build subscription in DeepSeek Harness",
   "type": "module",
   "main": "./lib/index.js",
@@ -13,10 +13,13 @@
   "files": [
     "lib",
     "docs/assets",
+    "docs/guide.zh-CN.md",
+    "docs/guide.en.md",
     "cordis.patch.yml",
     "README.md",
     "README.en.md",
     "CONTRIBUTING.md",
+    "CHANGELOG.md",
     "SECURITY.md",
     "LICENSE"
   ],

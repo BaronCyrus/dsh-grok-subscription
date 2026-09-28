@@ -18,7 +18,7 @@ dsh plugin --profile web list dsh-grok-subscription --depth 0
 For reproducibility, pin a published version, for example:
 
 ```sh
-dsh plugin --profile web add dsh-grok-subscription@1.0.20
+dsh plugin --profile web add dsh-grok-subscription@1.1.0
 ```
 
 **Install from GitHub:**
