@@ -1,17 +1,15 @@
-<p align="center">
-  <img src="docs/assets/dsh-grok-mascot.png" width="220" height="220" alt="DSH Grok Subscription 吉祥物：彗星领航员">
-</p>
-
-# DSH Grok Subscription — 在 DeepSeek Harness 使用 SuperGrok / X Premium 订阅
-
 <div align="center">
 
-**简体中文** · [English](https://github.com/BaronCyrus/dsh-grok-subscription/blob/main/README.en.md)
+<img src="docs/assets/dsh-grok-mascot.png" width="220" height="220" alt="DSH Grok Subscription 吉祥物：彗星领航员">
 
-**把 SuperGrok / X Premium（Grok Build）订阅直接接入 DeepSeek Harness**
+# DSH Grok Subscription
 
-复用官方 Grok Build CLI 的登录会话，不需要 `XAI_API_KEY`。
-模型、推理档位和每周额度都留在 DSH 里。
+**简体中文** · [English](README.en.md)
+
+**用 Grok Build 订阅，在 DSH 里编程、看图、切换推理档位。**
+
+复用官方 Grok Build CLI 登录会话，在 DeepSeek Harness 中选模型、带图提问、查看每周额度。
+无需另配 xAI 按量计费 API Key。
 
 [![CI](https://github.com/BaronCyrus/dsh-grok-subscription/actions/workflows/ci.yml/badge.svg)](https://github.com/BaronCyrus/dsh-grok-subscription/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/dsh-grok-subscription?logo=npm&label=npm)](https://www.npmjs.com/package/dsh-grok-subscription)
@@ -19,220 +17,155 @@
 [![MIT](https://img.shields.io/badge/license-MIT-111111.svg)](LICENSE)
 [![Star](https://img.shields.io/github/stars/BaronCyrus/dsh-grok-subscription?style=flat&logo=github&label=Star)](https://github.com/BaronCyrus/dsh-grok-subscription/stargazers)
 
-[三步开始](#三步开始) · [安装](#安装) · [参与贡献](CONTRIBUTING.md) · [更新与卸载](#更新与卸载)
+[功能](#功能) · [安装](#安装) · [日常使用](#日常使用) · [界面预览](#界面预览) · [使用指南](#使用指南) · [更新与卸载](#更新与卸载)
 
 </div>
 
-<p align="center">
-  <img src="docs/assets/grok-subscription-overview.webp" width="900" alt="在 DeepSeek Harness 中选择 Grok 4.7 并使用 SuperGrok 订阅进行多轮对话">
-</p>
-
-## 三步开始
-
-1. **安装插件**：在终端运行下面的命令；指定候选版本时填写完整的 `包名@版本`，例如 `dsh-grok-subscription@1.0.10`。
-
-   ```sh
-   dsh plugin --profile web add BaronCyrus/dsh-grok-subscription
-   ```
-
-2. **登录订阅**：打开 **设置 → Grok 订阅**，点击 **CLI 登录** 或 **设备码登录**。插件会运行官方 `grok login`，把 CLI 打印的登录链接交给浏览器，并在面板里显示一次性验证码与可点的链接；授权完成后自动同步。已经自己跑过 `grok login` 的话，直接点 **从 Grok CLI 拉取** 即可，不需要粘贴任何 token。
-3. **开始使用**：在模型选择器中选择 Grok 4.7 等模型。输入框旁的圆形徽章显示每周剩余额度，模型菜单里有推理档位。
-
-安装或升级后需要重启 `dsh web`，否则会继续运行旧的 `lib/`。
-
-## 核心优势
-
-| 能力 | 用户得到什么 |
-| --- | --- |
-| **订阅直连** | 复用官方 Grok Build CLI 会话，不需要 `XAI_API_KEY` |
-| **真实模型目录** | 登录后从 `/v1/models-v2` 读取账号实际可用的模型（如 `grok-4.7`、`grok-4.6`、`grok-4.5`）；未登录时不暴露任何模型 |
-| **推理档位** | 模型选择器内置 `low` / `medium` / `high` / `xhigh` 子菜单，默认 `high`，与 Codex 的交互一致 |
-| **图片输入** | `grok-4.7` / `grok-4.7-fast` / `grok-4.6` 可直接粘贴图片提问，图片由宿主的附件服务按像素与体积预算归一化 |
-| **输入框额度** | 模型选择器旁的徽章直接显示每周剩余比例，悬停或点击查看「每周额度 剩余 N% · 重置于 M/D HH:mm」 |
-| **用量面板（实验性）** | 设置页显示服务端返回的已用与剩余百分比，读取失败时不猜数字、不虚构额度 |
-| **凭据留在本机** | 只在主机侧读取 `~/.grok/auth.json` 的短期 access token；不会把 token 交给浏览器 RPC |
-| **登录状态会刷新界面** | 登录、拉取或登出后自动派发 `llm/adapters-updated`，Chat 模型列表随之更新 |
-| **token 自动续期** | access token 只有 6 小时有效期；临近过期或遇到 401 时，插件会调用官方 `grok` CLI 刷新 `auth.json` 并自动重试一次，不需要手动重新登录 |
-| **失败可见** | 订阅路由不可用时明确报错，不会静默改用其他付费路由 |
-
-这些能力共用同一份本机 Grok Build 登录。
-
-## 实际界面
-
-<p align="center">
-  <img src="docs/assets/settings-account.webp" width="820" alt="DSH 设置中的 Grok 订阅页面：登录状态、账号、登录按钮与凭据说明">
-</p>
-
-上图为 **设置 → Grok 订阅** 主界面：顶部状态胶囊显示登录状态，账户卡片提供 CLI 登录、设备码登录、从 Grok CLI 拉取和登出，凭据读取方式收在可展开的「登录方式说明」里。样式沿用 DSH 自身的设计变量，因此跟随主题明暗切换。截图中的账号与时间均为演示数据。
-
-<p align="center">
-  <img src="docs/assets/settings-usage.webp" width="820" alt="Grok 订阅设置页中的实验性用量面板：已用 6%、剩余约 94%">
-</p>
-
-实验性用量面板来自未公开的订阅计费接口（`/v1/billing?format=credits`）：剩余比例以进度条呈现，产品明细逐行列出。它仅供参考：接口可能随时变化或消失，读取失败时不会显示编造的百分比，也不影响聊天。
-
-## 准备 DSH
-
-本插件支持软件包元数据中记录的最新版 DeepSeek Harness，并需要一个具有 Grok Build 使用资格的 **SuperGrok 或 X Premium** 账号。
-
-- **已经能运行 `dsh`**：直接使用下面的标准命令；
-- **想按官方方式运行**：查看 [DeepSeek Harness 官方说明](https://github.com/deepseek-ai/deepseek-harness#run)。
-
-插件读取 `~/.grok/auth.json` 时较为严格：拒绝符号链接、拒绝组或其他用户可读的文件、拒绝非当前用户拥有的文件。如果权限不正确：
-
-```sh
-chmod 600 "${GROK_HOME:-$HOME/.grok}/auth.json"
-```
-
-## 安装
-
-### DSH 标准命令
-
-```sh
-dsh plugin --profile web add BaronCyrus/dsh-grok-subscription
-```
-
-也可以按 npm 上的已发布版本安装：
-
-```sh
-dsh plugin --profile web add dsh-grok-subscription@1.0.10
-```
-
-目标选择、profile 锁、依赖解析和 bundle 激活均由 DSH 负责。
-
-### Headless
-
-先在 Web 中完成登录并选择一次 Grok 模型，再把同一个插件安装到 DSH 的标准 Headless profile：
-
-```sh
-dsh plugin --profile headless add BaronCyrus/dsh-grok-subscription
-dsh --profile headless "只回复：ok"
-```
-
-<details>
-<summary>官方 npm 方式（已安装 Node.js）</summary>
-
-官方的 `npx @deepseek-ai/dsh web` 不会创建全局 `dsh` 命令，因此安装插件时也要保留完整的 `npx` 前缀：
-
-```sh
-npx -y @deepseek-ai/dsh@0.1.5-rc.2 plugin --profile web add BaronCyrus/dsh-grok-subscription
-npx -y @deepseek-ai/dsh@0.1.5-rc.2 plugin --profile web list dsh-grok-subscription --depth 0
-npx -y @deepseek-ai/dsh@0.1.5-rc.2 --profile web --dump-config
-```
-
-</details>
-
-<details>
-<summary>已经能运行 <code>dsh</code> 时检查安装结果</summary>
-
-```sh
-dsh plugin --profile web list dsh-grok-subscription --depth 0
-dsh --profile web --dump-config
-```
-
-安装列表中应只有一个 `dsh-grok-subscription`，配置中应只有一个 `grok-build` 路由。
-
-</details>
-
-安装完成后手动重启 DSH，然后：
-
-1. 打开 **设置 → Grok 订阅**；
-2. 登录具有 Grok Build 资格的账号（浏览器登录或设备码登录）；
-3. 在模型选择器中选择 Grok 模型。
+<a id="核心优势"></a>
 
 ## 功能
 
-- 复用官方 Grok Build CLI 会话登录，凭据保留在本机；账号以部分隐藏的邮箱区分；
-- 模型直接出现在 DSH 会话中，无需 `XAI_API_KEY`，也不向浏览器暴露 token；
-- 模型目录登录后自动拉取；读取失败或超时时回退到内置列表并记录错误，未登录时保持为空；
-- 模型菜单提供 `low` / `medium` / `high` / `xhigh` 推理档位，默认 `high`；
-- 输入框模型选择器旁显示每周剩余额度徽章，悬停或点击查看剩余比例与重置时间；
-- 设置页可查看服务端返回的用量与剩余百分比，失败时明确提示而不是显示猜测值；
-- 支持 CLI 登录、设备码登录、从 Grok CLI 拉取和登出；登录状态变化后 Chat 模型列表自动刷新；
-- access token 到期自动续期：临近 6 小时有效期或收到 401 时，调用官方 `grok` CLI 刷新会话并重试一次，不会中途要求手动重新登录；
-- 订阅路由不可用时明确报错，不会静默切换到其他付费路由；
-- 前缀缓存按 xAI 的自动缓存语义优化：同一 DSH 会话使用稳定的 `prompt_cache_key`，工具定义保持稳定顺序，回退适配器会保存并原样回放 `reasoning.encrypted_content`。缓存仍可能因服务端逐出而失效，插件不虚构命中率。
+| 能力 | 使用体验 |
+| --- | --- |
+| **复用订阅登录** | 在设置页发起 CLI / 设备码登录，或拉取已有 Grok CLI 会话，无需手动粘贴 token |
+| **模型目录同步** | 登录后优先读取账号模型目录；读取失败时可使用内置目录，未登录时不显示模型 |
+| **推理档位** | 在模型菜单中选择可用档位，通常包含 `low` / `medium` / `high` / `xhigh`，默认优先使用 `high` |
+| **图片输入** | 支持的模型可接收粘贴或附加的图片；设置页可检查当前运行通路与附件能力 |
+| **每周额度** | 输入框徽章和设置页展示服务端返回的用量；额度接口为实验性，读取失败不编造数字 |
+| **会话续期与更新** | 临近过期或认证拒绝时尝试通过官方 CLI 续期；设置页也可检查插件版本 |
+| **凭据不返回浏览器** | access token 仅在 Host 侧使用；订阅失败不会静默改用其他付费模型路由 |
 
-### 输入框额度
+<a id="三步开始"></a>
+<a id="准备-dsh"></a>
+
+## 安装
+
+需要 **DeepSeek Harness**、运行在同一台机器上的**官方 Grok Build CLI**，以及**当前具有 Grok Build 使用资格**的 SuperGrok / X Premium 账号。订阅名称本身不保证访问资格，以账号实际授权为准。
+
+尚未安装 DSH，可查看 [DSH 官方说明](https://github.com/deepseek-ai/deepseek-harness#run)。版本要求与 CLI 路径说明见 [安装与兼容性](docs/guide.zh-CN.md#安装与兼容性)。
+
+### 1. 安装插件
+
+```sh
+dsh plugin --profile web add dsh-grok-subscription@latest
+```
+
+完成后，**手动重启正在运行的目标 DSH**。仅刷新浏览器不会重新加载 Host 中的适配器。
+
+### 2. 登录订阅
+
+打开 **设置 → Grok 订阅**，点击 **CLI 登录** 或 **设备码登录**，按浏览器和面板提示授权。已经运行过 `grok login`，可直接点击 **从 Grok CLI 拉取**。
+
+> 本插件依赖官方 Grok Build CLI 管理登录与续期，不是免 CLI 的方案。请勿粘贴 `XAI_API_KEY`，也不要把 `auth.json` 或 token 发到聊天、截图和公开 Issue 中。
+
+### 3. 选择模型
+
+在模型选择器中选择账号可用的 Grok 模型。按需要调整推理档位，开始对话或编程；模型旁的徽章显示成功读取到的每周余量。
+
+<details>
+<summary>检查安装 / 使用 npx / 安装指定版本</summary>
+
+```sh
+dsh plugin --profile web list dsh-grok-subscription --depth 0
+```
+
+没有全局 `dsh` 命令时，保留你使用的完整 `npx` 前缀。以下使用项目元数据声明的基线版本作为示例：
+
+```sh
+npx -y @deepseek-ai/dsh@0.1.5-rc.2 plugin --profile web add dsh-grok-subscription@latest
+```
+
+固定 npm 版本、GitHub 来源安装、CLI 路径与 Headless 使用见 [完整使用指南](docs/guide.zh-CN.md)。
+
+</details>
+
+## 日常使用
+
+**选模型与推理档位。** 登录后目录会刷新；以模型菜单提供的档位为准。目录读取失败时的内置列表不代表额外授予模型权限。
+
+**带图提问。** 在支持图片的模型下粘贴或附加图片。当前实现为 `grok-4.7`、`grok-4.7-build-fast`、`grok-4.6` 声明图片输入，不为 `grok-4.5` 声明；这指的是**读取图片，不是生成图片**。详见 [图片输入](docs/guide.zh-CN.md#图片输入)。
+
+**查看每周额度。** 选择 `grok-build` 路由后，徽章展示成功读取的剩余比例；悬停或点击查看重置时间。完整信息在设置页查看，额度读取失败本身不会阻止聊天。
+
+<a id="实际界面"></a>
+
+## 界面预览
 
 <p align="center">
-  <img src="docs/assets/composer-quota.webp" width="820" alt="DSH 输入框：Grok 4.7 模型选择器旁的每周剩余额度徽章">
+  <img src="docs/assets/grok-subscription-overview.webp" width="900" alt="在 DSH 中选择 Grok 订阅模型并进行对话">
 </p>
 
-仅当当前会话的 provider 为 `grok-build` 且用量读取成功时显示徽章；悬停或点击可查看「每周额度 剩余 N% · 重置于 M/D HH:mm」。徽章只反映服务端返回的每周额度；读取失败时徽章不显示，聊天不受影响。
+<p align="center">
+  <img src="docs/assets/composer-quota.webp" width="820" alt="Grok 模型选择器旁的每周剩余额度徽章">
+</p>
 
-### 图片输入
+<details>
+<summary>展开查看登录面板与实验性用量面板</summary>
 
-`grok-4.7`、`grok-4.7-fast` 与 `grok-4.6` 支持图片输入：在输入框粘贴或附加图片即可提问。图片由宿主的附件服务按像素与体积预算归一化后发送，超预算时降级为文本说明，而不是静默丢弃。
+<p align="center">
+  <img src="docs/assets/settings-account.webp" width="820" alt="Grok 订阅设置页中的账号状态与登录操作">
+</p>
 
-**两条通路都支持**：宿主官方 `pi-ai` 适配器可用时走官方实现，否则内置回退适配器自己读取附件字节并内联成 `input_image`。因此贴图能力不依赖宿主包的解析结果。设置页的「运行通路」会显示当前生效的是哪一条，以及图片输入是否可用 —— 遇到「当前模型不支持图片」时先看这一行。
+<p align="center">
+  <img src="docs/assets/settings-usage.webp" width="820" alt="Grok 订阅设置页中的实验性用量面板">
+</p>
 
-> 若显示「内置回退」且贴图被拒，通常是 `dsh web` 更新后没有重启：客户端界面会随刷新更新，但主机端适配器是进程启动时加载的。
+账号设置截图中的身份与时间为演示数据。用量截图仅说明界面，不代表任何账号的固定额度。
 
-`grok-4.5` **不在支持列表内**。实测给它一张纯红图片并询问颜色，它回答 "green"，还把黄色方块描述成「带黑边的圆」——它在编造而不是看图。插件因此不为它声明图片能力，避免输出看起来自信却完全错误的答案。
+</details>
 
-### 推理档位
+## 使用指南
 
-选择 Grok 模型后，模型菜单里会出现推理档位子菜单：`low` / `medium` / `high` / `xhigh`，默认 `high`。档位通过 `model.reasoning`（`efforts` + `defaultEffort`）元数据提供，因此与 Codex 在 DSH 中的交互一致；具体可用档位以账号模型目录为准。
+[完整使用指南](docs/guide.zh-CN.md) 包含 CLI 登录、模型目录、图片输入、额度限制、网络排查、Headless 使用和本地开发。
 
-### 模型目录与登录状态
-
-登录后插件从订阅代理读取账号实际可用的模型目录；未登录时不注册任何模型。读取失败或超时时回退到内置列表（`grok-4.7` / `grok-4.6` / `grok-4.5`）并在状态里记录错误，因此目录不会留空，也不会让插件启动卡住。
+常用入口：[登录与凭据](docs/guide.zh-CN.md#登录与凭据) · [图片输入](docs/guide.zh-CN.md#图片输入) · [故障排查](docs/guide.zh-CN.md#故障排查) · [参与贡献](CONTRIBUTING.md)。
 
 ## 更新与卸载
 
-### 更新并检查
+**更新 npm 安装：** 可在设置页检查版本；支持的 npm 安装可一键更新，也可以运行：
 
 ```sh
-dsh plugin --profile web update dsh-grok-subscription
-dsh plugin --profile web list dsh-grok-subscription --depth 0
-dsh --profile web --dump-config
+dsh plugin --profile web add dsh-grok-subscription@latest
 ```
 
-### 卸载
+GitHub 来源安装可使用 `dsh plugin --profile web update dsh-grok-subscription`；本地 `link:` 安装应拉取对应仓库并重新构建，不要替换开发链接。
 
-确认需要移除插件后再运行：
+**卸载：**
 
 ```sh
 dsh plugin --profile web remove dsh-grok-subscription
 ```
 
-这些操作会保留 DSH profile、其他插件和 `~/.grok/auth.json` 中的登录信息。
-
-<details>
-<summary>官方 npm 备用方式</summary>
-
-```sh
-npx -y @deepseek-ai/dsh@0.1.5-rc.2 plugin --profile web update dsh-grok-subscription
-npx -y @deepseek-ai/dsh@0.1.5-rc.2 plugin --profile web remove dsh-grok-subscription
-```
-
-</details>
+完成后手动重启 DSH。卸载不会删除其他插件、整个 profile 或 Grok CLI 的 `auth.json`，也不等于从官方 CLI 登出；清理范围见 [更新与登出](docs/guide.zh-CN.md#更新与登出)。
 
 ## 常见问题
 
-- **`dsh` 无法识别**：官方 npm 方式本来就不会创建全局 `dsh` 命令，请使用上面的完整 `npx -y @deepseek-ai/dsh@0.1.5-rc.2 ...` 命令；
-- **模型列表是空的**：未登录时插件不暴露任何模型。先完成登录，再点 **从 Grok CLI 拉取**；
-- **登录不弹浏览器 / 聊天报 `fetch failed` / 用量「Billing request timed out」**：这三件事都指向同一个原因——`accounts.x.ai` 与 `cli-chat-proxy.grok.com` 在部分网络里必须走隧道。插件不再自己配代理。需要隧道时，在启动环境或 `~/.dsh/.env` 里写标准变量 `https_proxy` / `http_proxy`（不要写进项目目录的 `.env`），宿主的 `@deepseek-ai/dsh-http-proxy` 会让 `fetch` 和本插件拉起的 `grok` CLI 一起走它。写好后重启客户端；登录链接会交给系统浏览器打开，面板里同时显示一次性验证码与可点链接。
-- **升级后界面没变化**：插件会继续运行旧的 `lib/`，请重新安装插件并重启 `dsh web`，然后硬刷新（Ctrl+Shift+R）；
-- **提示 `auth.json` 权限不正确**：按上面的 `chmod 600` 处理；插件拒绝读取符号链接或组/其他用户可读的文件；
-- **出现「没有回复」**：请升级到 `1.0.1` 或更高版本。`1.0.0` 存在一个缺陷：工具调用轮次会因流片段无法无损序列化而整轮中止，界面上完全没有回复。
-- **聊天或用量提示 401「Invalid or expired credentials」**：Grok 的 access token 只有约 6 小时有效期，过期后聊天和用量会一起失败。`1.0.5` 起插件会自动调用官方 CLI 续期；更早版本请先运行任意 `grok` 命令（如 `grok models`）刷新 `~/.grok/auth.json`，再点面板里的「从 Grok CLI 拉取」。
+**模型列表为空？** 先确认官方 Grok CLI 已完成订阅登录，再在设置页点击「从 Grok CLI 拉取」。只有 API Key 的 CLI 配置不等于订阅登录。
+
+**登录或请求超时？** 检查 DSH 所在机器能否连接账号与订阅服务，以及启动环境的代理设置。网络、登录状态和服务端异常都可能导致失败，不要直接认定为额度耗尽。见 [故障排查](docs/guide.zh-CN.md#故障排查)。
+
+**更新后不能带图？** 完整重启 DSH，检查模型是否在图片支持列表，以及设置页的「运行通路」是否显示附件能力可用。
 
 ## 边界与支持
 
-Grok 订阅后端和 DSH 可能独立变化；本项目为社区项目，与 DeepSeek、xAI 无隶属或背书关系。
+本项目是社区插件，与 DeepSeek、xAI 无隶属或背书关系。模型访问、推理档位和订阅额度由账号与服务端决定；本插件不授予额外权益。
 
-敏感问题请先阅读 [SECURITY.md](SECURITY.md)。问题反馈请使用 [Issues](https://github.com/BaronCyrus/dsh-grok-subscription/issues)。
+用量面板依赖未公开的订阅计费接口，属于**实验性能力**，可能因上游变化而不可用。凭据不返回浏览器不代表离线运行：模型请求仍发送到 Grok 订阅服务。
 
-### 开发检查
+安全说明见 [SECURITY.md](SECURITY.md)，问题反馈见 [Issues](https://github.com/BaronCyrus/dsh-grok-subscription/issues)。不要公开登录文件、token、原始账号响应或完整登录回调。
+
+## 本地开发
 
 ```sh
-npm install
+git clone https://github.com/BaronCyrus/dsh-grok-subscription.git
+cd dsh-grok-subscription
+npm ci
 npm test
 npm run build
 ```
 
-`lib/` 是提交进仓库的构建产物，改动 `src/` 后请运行 `npm run build`。
+`lib/` 是已提交的构建产物，修改 `src/` 后应重新构建，不要手动编辑。开发与验证要求见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+
+## License
 
 [MIT](LICENSE)

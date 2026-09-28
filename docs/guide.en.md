@@ -1,0 +1,145 @@
+# Grok subscription user guide
+
+[Project home](../README.en.md) · [简体中文](guide.zh-CN.md) · **English**
+
+For quick setup, see the [README](../README.en.md#install). This guide covers dependencies, capability limits, and troubleshooting.
+
+## Installation and compatibility
+
+You need DeepSeek Harness, the official Grok Build CLI, and an account with Grok Build access. The plugin declares Node.js `^22.19.0 || >=24.0.0`; DSH peers use `^0.1.5-rc.2`. See [package.json](../package.json) for the full requirements. Declared compatibility is not a claim that every version has passed live verification.
+
+**Install from npm:**
+
+```sh
+dsh plugin --profile web add dsh-grok-subscription@latest
+dsh plugin --profile web list dsh-grok-subscription --depth 0
+```
+
+For reproducibility, pin a published version, for example:
+
+```sh
+dsh plugin --profile web add dsh-grok-subscription@1.0.20
+```
+
+**Install from GitHub:**
+
+```sh
+dsh plugin --profile web add BaronCyrus/dsh-grok-subscription
+```
+
+The GitHub branch and published npm package may differ. Choose an installation source deliberately; a source commit does not mean a new npm version has been published.
+
+If you launch DSH with `npx` and have no global `dsh` command, retain the full prefix for plugin operations. This example uses the baseline declared in the package:
+
+```sh
+npx -y @deepseek-ai/dsh@0.1.5-rc.2 plugin --profile web add dsh-grok-subscription@latest
+npx -y @deepseek-ai/dsh@0.1.5-rc.2 plugin --profile web list dsh-grok-subscription --depth 0
+```
+
+Restart the target DSH instance after installation. For local diagnosis, `dsh --profile web --dump-config` should show one `grok-build` route. Redact sensitive settings and personal paths before sharing diagnostics; do not post the full configuration.
+
+## Sign-in and credentials
+
+**The official Grok Build CLI must be available on the DSH Host**, not just on the phone or another computer viewing the Web UI. The plugin checks `DSH_GROK_BIN`, then `${GROK_HOME:-$HOME/.grok}/bin/grok`, then `grok` on `PATH`. See [session.js](../src/session.js).
+
+Use **CLI login** or **Device-code login** in Settings. The plugin invokes the official CLI and shows the available authorization link and one-time code in the panel. Alternatively, run this locally:
+
+```sh
+grok login
+```
+
+After authorizing, select **Pull from Grok CLI**. An `XAI_API_KEY`-only configuration is not a Grok Build subscription session. Never copy `auth.json`, access tokens, or refresh tokens into chats or public reports.
+
+The plugin reads `${GROK_HOME:-$HOME/.grok}/auth.json` and rejects symlinks, non-regular files, and unsafe ownership or permissions. On macOS / Linux, after confirming the path and owner are correct, fix permission bits with:
+
+```sh
+chmod 600 "${GROK_HOME:-$HOME/.grok}/auth.json"
+```
+
+This does not fix an incorrect owner or make a symlink safe. The plugin itself does not write the file; the official CLI manages the session file and renewal. DSH stores only the short-lived access token it needs, without returning tokens through browser RPC. See [SECURITY.md](../SECURITY.md).
+
+## Model catalog and reasoning
+
+After sign-in, the plugin prefers the catalog from `/v1/models-v2`; while signed out, models are empty. A failed, timed-out, or empty catalog read uses the built-in `grok-4.7` / `grok-4.6` / `grok-4.5` list and records the error. **This is a catalog fallback, not a different paid service, and listed models are not guaranteed entitlements.**
+
+Reasoning options follow model metadata. The implementation recognizes `low` / `medium` / `high` / `xhigh`, usually defaulting to `high`; the built-in `grok-4.5` entry has only the first three. Follow the actual menu and backend-supported choices. See [catalog.js](../src/catalog.js).
+
+Login, pull, logout, and catalog refresh notify the model picker. Near a known token expiry, or after an authentication rejection, the plugin attempts renewal through the official CLI. If renewal fails, authorization may still be required again; uninterrupted sessions are not guaranteed.
+
+## Image input
+
+The source currently advertises image input only for:
+
+```text
+grok-4.7
+grok-4.7-build-fast
+grok-4.6
+```
+
+These exact IDs come from `IMAGE_INPUT_MODEL_IDS` in [constants.js](../src/constants.js); `grok-4.5` is excluded. Image input is not image generation, and a model's name alone does not establish image support.
+
+Paste or attach an image in the composer. DSH's attachment service processes it within pixel and byte budgets; over-budget images may degrade to a text description. Do not assume every image is sent at its original resolution.
+
+Both the host's pi-ai adapter and the bundled fallback have image-handling paths, but both depend on the host attachment capability. The **Active path** row in Settings shows the adapter and whether image input is available. After an update, a refreshed browser can still be using an old adapter if the Host was not restarted.
+
+## Quota and caching
+
+Usage is read through the undocumented `/v1/billing?format=credits` endpoint and is experimental. Settings displays the used and remaining percentages actually returned. Interface changes, network failures, or invalid authentication can make the data unavailable.
+
+The composer badge appears only for `grok-build` with a successful usage read; hover or click for weekly quota and its reset time. Missing data does not mean zero quota. A failed read does not invent percentages or independently block chat.
+
+For prefix caching, the plugin keeps a stable `prompt_cache_key` and tool ordering within a DSH session, and the bundled adapter preserves `reasoning.encrypted_content`. These are request-construction measures, not a guarantee of backend cache hits or quota savings. No invented hit rate is reported. See [adapter.js](../src/adapter.js).
+
+## Headless usage
+
+First complete subscription sign-in through the Grok CLI on the same host and verify Web usage. Then install the plugin into the target Headless profile:
+
+```sh
+dsh plugin --profile headless add dsh-grok-subscription@latest
+```
+
+Confirm that this profile's model configuration selects a `grok-build` model the account can use, then run a one-shot interactive task:
+
+```sh
+dsh --profile headless "reply with exactly: ok"
+```
+
+That task makes a real model request and uses the selected service's quota; it is not an offline check. Selecting a model in Web is not proof that another profile is configured correctly.
+
+## Troubleshooting
+
+**`dsh` not found.** Use the full `npx` prefix you use to launch DSH, or check the installed launcher's path.
+
+**`grok` not found or no login window.** Check that the CLI is installed on the DSH Host and its process sees `DSH_GROK_BIN` / `PATH`. Look for a clickable login link in the panel. A browser failing to open does not by itself prove the authorization service is unreachable.
+
+**`fetch failed` or `Billing request timed out`.** Check access to the account service and `cli-chat-proxy.grok.com` separately. When a proxy is needed, set standard `https_proxy` / `http_proxy` variables in DSH's launch environment or `~/.dsh/.env`, not the project directory's `.env`, then manually restart DSH. The plugin uses the host network setup rather than providing its own proxy service. Network conditions are one possibility; also check authentication and backend errors.
+
+**Empty model list.** Complete subscription sign-in and select **Pull from Grok CLI**. Check for an API-key-only login entry and inspect catalog status without sharing raw responses.
+
+**Chat or usage returns `401`.** Check the CLI session. If automatic renewal fails, run `grok login` again, authorize, and pull the session. Do not repeatedly paste an old token.
+
+**Images rejected.** Check the supported IDs and attachment capability under **Active path**. Fully restart the Host after updating, then refresh the browser.
+
+**Auth-file permission error.** Check the actual path, owner, symlink status, and permissions. `chmod 600` fixes permission bits only.
+
+**No response on an old release.** Version `1.0.0` had a tool-call serialization defect fixed in `1.0.1`; older versions may also lack later renewal fixes. Update to the current published version before diagnosing a persistent problem rather than attributing every missing response to that old defect.
+
+## Updates and sign-out
+
+For npm installs, update in Settings or run `dsh plugin --profile web add dsh-grok-subscription@latest`. For GitHub-source installs, run `dsh plugin --profile web update dsh-grok-subscription`. For local links, pull, test, and rebuild the checkout. Restart DSH afterwards.
+
+Uninstall with `dsh plugin --profile web remove dsh-grok-subscription`. This leaves the profile, other plugins, and the CLI's `auth.json` intact.
+
+The Settings logout action clears plugin-side session state; it does not revoke the official CLI session. If the CLI file remains, a later pull or startup may sync it again. To end the official session, use the official CLI / account's sign-out and authorization-management flow. Do not delete an entire DSH profile to handle one account.
+
+## Local development
+
+Follow [CONTRIBUTING.md](../CONTRIBUTING.md) to install locked dependencies, test, and build:
+
+```sh
+npm ci
+npm test
+npm run build
+```
+
+After source changes, regenerate tracked `lib/` rather than editing it manually. Passing tests and builds do not verify real sign-in, GUI behavior, or live model calls. Restart DSH manually before evaluating Host changes.

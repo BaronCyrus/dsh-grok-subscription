@@ -2,235 +2,172 @@
 
 <img src="docs/assets/dsh-grok-mascot.png" width="220" height="220" alt="DSH Grok Subscription mascot: Comet Navigator">
 
-# DSH Grok Subscription — Use SuperGrok / X Premium subscriptions in DeepSeek Harness
+# DSH Grok Subscription
 
-[简体中文](https://github.com/BaronCyrus/dsh-grok-subscription/blob/main/README.md) · **English**
+[简体中文](README.md) · **English**
 
-**Use your SuperGrok / X Premium (Grok Build) subscription directly in DeepSeek Harness**
+**Code, ask about images, and adjust reasoning in DSH with your Grok Build subscription.**
 
-Reuse the official Grok Build CLI session — no `XAI_API_KEY` needed.
-Models, reasoning effort, and weekly quota all stay inside DSH.
+Reuse the official Grok Build CLI session to select models, attach images, and check weekly quota inside DeepSeek Harness.
+No separate pay-as-you-go xAI API key is required.
 
 [![CI](https://github.com/BaronCyrus/dsh-grok-subscription/actions/workflows/ci.yml/badge.svg)](https://github.com/BaronCyrus/dsh-grok-subscription/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/dsh-grok-subscription?logo=npm&label=npm)](https://www.npmjs.com/package/dsh-grok-subscription)
-[![total npm downloads](https://img.shields.io/npm/dt/dsh-grok-subscription?logo=npm&label=total%20downloads)](https://www.npmjs.com/package/dsh-grok-subscription)
+[![Total npm downloads](https://img.shields.io/npm/dt/dsh-grok-subscription?logo=npm&label=total%20downloads)](https://www.npmjs.com/package/dsh-grok-subscription)
 [![MIT](https://img.shields.io/badge/license-MIT-111111.svg)](LICENSE)
 [![Star](https://img.shields.io/github/stars/BaronCyrus/dsh-grok-subscription?style=flat&logo=github&label=Star)](https://github.com/BaronCyrus/dsh-grok-subscription/stargazers)
 
-[Three-step start](#three-step-start) · [Install](#install) · [Contribute](CONTRIBUTING.md) · [Update and uninstall](#update-and-uninstall)
+[Features](#features) · [Install](#install) · [Daily use](#daily-use) · [Screenshots](#screenshots) · [User guide](#user-guide) · [Update and uninstall](#update-and-uninstall)
 
 </div>
 
-<p align="center">
-  <img src="docs/assets/grok-subscription-overview.webp" width="900" alt="Select Grok 4.7 in DeepSeek Harness and chat through a SuperGrok subscription">
-</p>
-
-## Three-step start
-
-1. **Install the plugin.** Run the command below; to select a candidate version, enter the full `package@version`, for example `dsh-grok-subscription@1.0.10`.
-
-   ```sh
-   dsh plugin --profile web add BaronCyrus/dsh-grok-subscription
-   ```
-
-2. **Sign in to the subscription.** Open **Settings → Grok Subscription** and click **CLI login** or **Device-code login**. The plugin runs the official `grok login`, hands the link the CLI prints to your browser, and shows the one-time code plus a clickable link in the panel; the session syncs itself once you authorize. If you already ran `grok login` yourself, just click **Pull from Grok CLI** — nothing has to be pasted.
-3. **Start using it.** Pick a model such as Grok 4.7 in the model picker. The round badge next to the picker shows weekly remaining quota, and the model menu offers reasoning effort levels.
-
-Restart `dsh web` after installing or upgrading, otherwise the old `lib/` keeps running.
-
-## Why this plugin
-
-| Capability | What you get |
-| --- | --- |
-| **Direct subscription routing** | Reuse the official Grok Build CLI session — no `XAI_API_KEY` needed |
-| **Real model catalog** | Read the models the account can actually use (such as `grok-4.7`, `grok-4.6`, `grok-4.5`) from `/v1/models-v2`; nothing is exposed while signed out |
-| **Reasoning effort** | The model picker offers `low` / `medium` / `high` / `xhigh`, defaulting to `high`, matching the Codex interaction |
-| **Image input** | `grok-4.7` / `grok-4.7-fast` / `grok-4.6` accept pasted images, normalized to the host's pixel and byte budget by its attachment service |
-| **Composer quota** | A badge beside the model picker shows weekly remaining percentage; hover or click for "Weekly quota · N% left · resets M/D HH:mm" |
-| **Usage panel (experimental)** | Settings shows the used and remaining percentages the backend reports, and never invents numbers when the read fails |
-| **Credentials stay local** | Only the short-lived access token from `~/.grok/auth.json` is read on the host; no token is handed to browser RPC |
-| **Sign-in state refreshes the UI** | Login, pull, and logout emit `llm/adapters-updated`, so the chat model list updates with them |
-| **Automatic token renewal** | The access token only lives 6 hours; near expiry, or on a 401, the plugin runs the official `grok` CLI to refresh `auth.json` and retries once, so you never re-login by hand |
-| **Failures stay visible** | When subscription routing is unavailable it reports an error instead of silently using another paid route |
-
-These capabilities reuse the same local Grok Build sign-in.
-
-## Product screen
-
-<p align="center">
-  <img src="docs/assets/settings-account.webp" width="820" alt="The Grok Subscription page in DSH Settings: sign-in status, account, login buttons and credential notes">
-</p>
-
-The **Settings → Grok Subscription** screen uses a status chip for the sign-in state, and an account card offering CLI login, device-code login, pull from the Grok CLI, and logout; how credentials are read lives in a collapsible "How signing in works" disclosure. It is styled with DSH's own design tokens, so it follows the light and dark theme. Account and time values in the screenshot are demo data.
-
-<p align="center">
-  <img src="docs/assets/settings-usage.webp" width="820" alt="The experimental usage panel in Grok Subscription settings: 6% used, about 94% remaining">
-</p>
-
-The experimental usage panel comes from an undocumented subscription billing endpoint (`/v1/billing?format=credits`): the remaining share is drawn as a progress bar and per-product rows are listed separately. It is informational: the endpoint may change or disappear, a failed read never shows an invented percentage, and chat is unaffected.
-
-## Prepare DSH
-
-This plugin supports the latest DeepSeek Harness release recorded in its package metadata and requires a **SuperGrok or X Premium** account that currently has Grok Build access.
-
-- **Already able to run `dsh`**: use the standard command below;
-- **Prefer the official path**: see the [DeepSeek Harness documentation](https://github.com/deepseek-ai/deepseek-harness#run).
-
-The plugin is strict about `~/.grok/auth.json`: it refuses symbolic links, files readable by group or others, and files not owned by the current user. If permissions are wrong:
-
-```sh
-chmod 600 "${GROK_HOME:-$HOME/.grok}/auth.json"
-```
-
-## Install
-
-### Standard DSH command
-
-```sh
-dsh plugin --profile web add BaronCyrus/dsh-grok-subscription
-```
-
-You can also install the version published on npm:
-
-```sh
-dsh plugin --profile web add dsh-grok-subscription@1.0.10
-```
-
-DSH handles target selection, the profile lock, dependency resolution, and bundle activation.
-
-### Headless
-
-Sign in and select a Grok model once in the Web UI, then install the same plugin into the standard DSH Headless profile:
-
-```sh
-dsh plugin --profile headless add BaronCyrus/dsh-grok-subscription
-dsh --profile headless "reply with exactly: ok"
-```
-
-<details>
-<summary>Official npm route (Node.js installed)</summary>
-
-The official `npx @deepseek-ai/dsh web` does not create a global `dsh` command, so keep the full `npx` prefix when installing the plugin:
-
-```sh
-npx -y @deepseek-ai/dsh@0.1.5-rc.2 plugin --profile web add BaronCyrus/dsh-grok-subscription
-npx -y @deepseek-ai/dsh@0.1.5-rc.2 plugin --profile web list dsh-grok-subscription --depth 0
-npx -y @deepseek-ai/dsh@0.1.5-rc.2 --profile web --dump-config
-```
-
-</details>
-
-<details>
-<summary>Verify the install when <code>dsh</code> already works</summary>
-
-```sh
-dsh plugin --profile web list dsh-grok-subscription --depth 0
-dsh --profile web --dump-config
-```
-
-The package list should contain exactly one `dsh-grok-subscription`, and the config exactly one `grok-build` route.
-
-</details>
-
-Restart DSH manually afterwards, then:
-
-1. Open **Settings → Grok Subscription**;
-2. Sign in with an account that has Grok Build access (browser login or device-code login);
-3. Select a Grok model in the model picker.
+<a id="why-this-plugin"></a>
 
 ## Features
 
-- Reuses the official Grok Build CLI session; credentials stay local and the account is identified by a partially masked email;
-- Models appear directly in DSH sessions with no `XAI_API_KEY`, and no token is exposed to the browser;
-- The model catalog is pulled after sign-in; a failed or timed-out read falls back to a built-in list and records the error, and it stays empty while signed out;
-- The model menu offers `low` / `medium` / `high` / `xhigh` reasoning effort, defaulting to `high`;
-- A weekly remaining quota badge sits beside the model picker in the composer, with remaining percentage and reset time on hover or click;
-- Settings can show the used and remaining percentages the backend reports, and says so plainly instead of guessing when the read fails;
-- Supports CLI login, device-code login, pull from the Grok CLI, and logout;
-- Renews the access token automatically: near the end of its 6-hour life, or on a 401, it runs the official `grok` CLI and retries once, so a session never lapses mid-use; the chat model list refreshes whenever sign-in state changes;
-- When subscription routing is unavailable it reports an error instead of silently switching to another paid route;
-- Prefix caching follows xAI's automatic prompt-cache semantics: one DSH session keeps a stable `prompt_cache_key`, tool definitions stay in a stable order, and the fallback adapter preserves and replays `reasoning.encrypted_content` unchanged. Server-side eviction can still miss, and the plugin never invents a hit rate.
+| Capability | What it does |
+| --- | --- |
+| **Reuse subscription sign-in** | Start CLI / device-code login in Settings, or pull an existing Grok CLI session without manually pasting tokens |
+| **Model catalog sync** | Prefers the account's live catalog after sign-in, with a built-in fallback when that read fails; no models appear while signed out |
+| **Reasoning effort** | Select the levels offered by each model, typically `low` / `medium` / `high` / `xhigh`, with `high` preferred by default |
+| **Image input** | Paste or attach images for supported models; Settings shows the active adapter path and attachment capability |
+| **Weekly quota** | The composer badge and Settings show reported usage; the experimental quota reader never invents missing numbers |
+| **Session renewal and updates** | Attempts renewal through the official CLI near token expiry or after an authentication rejection; Settings also checks plugin versions |
+| **No tokens in browser responses** | Access tokens are used Host-side; a subscription failure never silently selects another paid model route |
 
-### Composer quota
+<a id="three-step-start"></a>
+<a id="prepare-dsh"></a>
+
+## Install
+
+You need **DeepSeek Harness**, the **official Grok Build CLI on the same machine**, and a SuperGrok / X Premium account that **currently has Grok Build access**. The subscription name alone does not guarantee that access; the account's actual authorization determines it.
+
+For DSH setup, see the [official instructions](https://github.com/deepseek-ai/deepseek-harness#run). Version requirements and CLI paths are covered in [Installation and compatibility](docs/guide.en.md#installation-and-compatibility).
+
+### 1. Install the plugin
+
+```sh
+dsh plugin --profile web add dsh-grok-subscription@latest
+```
+
+Then **manually restart the target DSH instance**. Refreshing the browser alone does not reload the Host adapter.
+
+### 2. Sign in
+
+Open **Settings → Grok Subscription** and select **CLI login** or **Device-code login**. Follow the browser and panel instructions. If you already ran `grok login`, select **Pull from Grok CLI**.
+
+> This plugin relies on the official Grok Build CLI for sign-in and renewal; it is not CLI-independent. Do not paste `XAI_API_KEY`, and never share `auth.json` or tokens in chats, screenshots, or public issues.
+
+### 3. Select a model
+
+Pick a Grok model your account can use, adjust reasoning effort as needed, and start chatting or coding. The badge beside the model shows weekly quota when usage can be read successfully.
+
+<details>
+<summary>Verify the install / use npx / pin a version</summary>
+
+```sh
+dsh plugin --profile web list dsh-grok-subscription --depth 0
+```
+
+Without a global `dsh` command, retain your full `npx` launcher prefix. This example uses the baseline version declared in the package metadata:
+
+```sh
+npx -y @deepseek-ai/dsh@0.1.5-rc.2 plugin --profile web add dsh-grok-subscription@latest
+```
+
+See the [full user guide](docs/guide.en.md) for pinned npm versions, GitHub-source installs, CLI paths, and Headless usage.
+
+</details>
+
+## Daily use
+
+**Choose a model and effort.** The catalog refreshes after sign-in. Use the effort levels shown for the selected model. A built-in fallback catalog does not grant additional model access.
+
+**Ask about images.** Paste or attach an image while using a supported model. The current implementation advertises image input for `grok-4.7`, `grok-4.7-build-fast`, and `grok-4.6`, but not `grok-4.5`. This means **reading images, not generating them**. See [Image input](docs/guide.en.md#image-input).
+
+**Check weekly quota.** With the `grok-build` route selected, the badge shows the remaining percentage when the read succeeds; hover or click for the reset time. Settings has the full details. A failed quota read does not itself block chat.
+
+<a id="product-screen"></a>
+
+## Screenshots
 
 <p align="center">
-  <img src="docs/assets/composer-quota.webp" width="820" alt="DSH composer: weekly remaining quota badge beside the Grok 4.7 model picker">
+  <img src="docs/assets/grok-subscription-overview.webp" width="900" alt="Select a Grok subscription model and chat in DSH">
 </p>
 
-The badge appears only when the current session's provider is `grok-build` and the usage read succeeds; hover or click for "Weekly quota · N% left · resets M/D HH:mm". It reflects only the weekly quota the backend returns, and when the read fails the badge is simply hidden — chat is unaffected.
+<p align="center">
+  <img src="docs/assets/composer-quota.webp" width="820" alt="Weekly remaining-quota badge beside the Grok model picker">
+</p>
 
-### Image input
+<details>
+<summary>Show the sign-in and experimental usage panels</summary>
 
-`grok-4.7`, `grok-4.7-fast` and `grok-4.6` accept image input: paste or attach an image in the composer and ask about it. Images are normalized to the host's pixel and byte budget by its attachment service before they are sent, and an over-budget image degrades to a text description rather than being dropped silently.
+<p align="center">
+  <img src="docs/assets/settings-account.webp" width="820" alt="Account status and sign-in actions in Grok Subscription settings">
+</p>
 
-**Both paths support it**: when the host's official `pi-ai` adapter is available it handles images, and otherwise the bundled fallback adapter reads the attachment bytes itself and inlines them as `input_image`. Image support therefore does not depend on resolving the host's packages. The **Active path** row in Settings shows which one is live and whether image input is available — check it first when a model rejects an image.
+<p align="center">
+  <img src="docs/assets/settings-usage.webp" width="820" alt="Experimental usage panel in Grok Subscription settings">
+</p>
 
-> If it says "bundled fallback" and images are rejected, `dsh web` most likely was not restarted after updating: the client UI refreshes from disk, but the host adapter is loaded at process start.
+Identity and time values in the account screenshot are demo data. Usage screenshots illustrate the UI, not a fixed allowance for any account.
 
-`grok-4.5` is **deliberately excluded**. Given a solid red image and asked its colour it answered "green", and it described a yellow square as a "circle with a black outline" — it confabulates instead of looking. The plugin therefore does not advertise image input for it, so it cannot return confident nonsense.
+</details>
 
-### Reasoning effort
+## User guide
 
-After selecting a Grok model, the model menu exposes a reasoning effort submenu: `low` / `medium` / `high` / `xhigh`, defaulting to `high`. The levels come from `model.reasoning` metadata (`efforts` + `defaultEffort`), so the interaction matches Codex in DSH; the levels actually available depend on the account's model catalog.
+The [full user guide](docs/guide.en.md) covers CLI sign-in, the model catalog, images, quota limitations, network troubleshooting, Headless usage, and development.
 
-### Model catalog and sign-in state
-
-After sign-in the plugin reads the model catalog the account can actually use from the subscription proxy; while signed out it registers no models at all. If the read fails or times out it falls back to a built-in list (`grok-4.7` / `grok-4.6` / `grok-4.5`) and records the error in status, so the catalog is never left empty and plugin startup is never blocked.
+Quick links: [Sign-in and credentials](docs/guide.en.md#sign-in-and-credentials) · [Image input](docs/guide.en.md#image-input) · [Troubleshooting](docs/guide.en.md#troubleshooting) · [Contributing](CONTRIBUTING.md).
 
 ## Update and uninstall
 
-### Update and verify
+**Update an npm installation:** check versions in Settings. Supported npm installs can update there, or you can run:
 
 ```sh
-dsh plugin --profile web update dsh-grok-subscription
-dsh plugin --profile web list dsh-grok-subscription --depth 0
-dsh --profile web --dump-config
+dsh plugin --profile web add dsh-grok-subscription@latest
 ```
 
-### Uninstall
+For a GitHub-source install, use `dsh plugin --profile web update dsh-grok-subscription`. For a local `link:` install, pull and rebuild the checkout instead of replacing its development link.
 
-Confirm you want the plugin removed, then run:
+**Uninstall:**
 
 ```sh
 dsh plugin --profile web remove dsh-grok-subscription
 ```
 
-These operations keep the DSH profile, other plugins, and the sign-in stored in `~/.grok/auth.json`.
+Restart DSH afterwards. Removal does not delete other plugins, the whole profile, or the CLI's `auth.json`; it is not the same as signing out of the official CLI. See [Updates and sign-out](docs/guide.en.md#updates-and-sign-out).
 
-<details>
-<summary>Official npm fallback</summary>
+<a id="troubleshooting"></a>
 
-```sh
-npx -y @deepseek-ai/dsh@0.1.5-rc.2 plugin --profile web update dsh-grok-subscription
-npx -y @deepseek-ai/dsh@0.1.5-rc.2 plugin --profile web remove dsh-grok-subscription
-```
+## FAQ
 
-</details>
+**Empty model list?** Confirm that the official CLI has a subscription session, then select **Pull from Grok CLI** in Settings. An API-key-only CLI configuration is not a subscription login.
 
-## Troubleshooting
+**Sign-in or requests time out?** Check connectivity from the DSH host to account and subscription services, including its launch-time proxy settings. Network issues, authentication, or service errors can cause failures; do not assume the quota is exhausted. See [Troubleshooting](docs/guide.en.md#troubleshooting).
 
-- **`dsh` is not recognized**: the official npm route never creates a global `dsh` command — use the full `npx -y @deepseek-ai/dsh@0.1.5-rc.2 ...` command above;
-- **The model list is empty**: nothing is exposed while signed out. Finish signing in, then click **Pull from Grok CLI**;
-- **Sign-in opens no browser / chat fails with `fetch failed` / usage says "Billing request timed out"**: all three have one cause — `accounts.x.ai` and `cli-chat-proxy.grok.com` need a tunnel on some networks. This plugin does not configure a proxy of its own. When a tunnel is required, set the standard `https_proxy` / `http_proxy` in the launching environment or in `~/.dsh/.env` (never in a project `.env`). `@deepseek-ai/dsh-http-proxy` then routes `fetch` and the `grok` CLI this plugin spawns. Restart the client afterwards; the sign-in link is handed to your browser and the panel also shows the one-time code and a clickable link.
-- **Nothing changed after upgrading**: the plugin keeps running the old `lib/` — reinstall the plugin, restart `dsh web`, and hard-refresh (Ctrl+Shift+R);
-- **It reports `auth.json` permissions**: apply the `chmod 600` above; the plugin refuses symlinks and group- or other-readable files;
-- **"No reply" after sending a message**: upgrade to `1.0.1` or later. `1.0.0` had a defect where tool-calling turns aborted with a non-serializable stream chunk, leaving no reply in the UI at all.
-- **Chat or usage reports 401 "Invalid or expired credentials"**: a Grok access token only lives about 6 hours, and once it lapses chat and usage fail together. From `1.0.5` the plugin renews it through the official CLI automatically; on older versions run any `grok` command (for example `grok models`) to refresh `~/.grok/auth.json`, then click **Pull from Grok CLI**.
+**Images still unavailable after updating?** Fully restart DSH, check the model's image support, and check the attachment capability shown under **Active path** in Settings.
 
 ## Scope and support
 
-The Grok subscription backend and DSH can change independently; this is a community project with no affiliation or endorsement from DeepSeek or xAI.
+This is a community plugin, not affiliated with or endorsed by DeepSeek or xAI. Model access, reasoning options, and quota depend on the account and backend; the plugin does not grant extra entitlements.
 
-For sensitive issues read [SECURITY.md](SECURITY.md) first. For bug reports use [Issues](https://github.com/BaronCyrus/dsh-grok-subscription/issues).
+The usage panel depends on an undocumented billing endpoint and is **experimental**. Upstream changes may make it unavailable. Keeping credentials out of browser responses does not mean offline inference: model requests still go to the Grok subscription service.
 
-### Development checks
+See [SECURITY.md](SECURITY.md) and use [Issues](https://github.com/BaronCyrus/dsh-grok-subscription/issues) for reports. Never publish login files, tokens, raw account responses, or complete login callbacks.
+
+## Local development
 
 ```sh
-npm install
+git clone https://github.com/BaronCyrus/dsh-grok-subscription.git
+cd dsh-grok-subscription
+npm ci
 npm test
 npm run build
 ```
 
-`lib/` is a committed build artifact, so run `npm run build` after changing `src/`.
+`lib/` contains committed build output. Rebuild it after changing `src/` rather than editing it by hand. See [CONTRIBUTING.md](CONTRIBUTING.md) for development and verification requirements.
+
+## License
 
 [MIT](LICENSE)
