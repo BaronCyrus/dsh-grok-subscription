@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="docs/assets/dsh-grok-mascot.png" width="220" height="220" alt="DSH Grok Subscription mascot: Comet Navigator">
+
 # DSH Grok Subscription — Use SuperGrok / X Premium subscriptions in DeepSeek Harness
 
 [简体中文](https://github.com/BaronCyrus/dsh-grok-subscription/blob/main/README.md) · **English**

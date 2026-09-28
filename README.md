@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/assets/dsh-grok-mascot.png" width="220" height="220" alt="DSH Grok Subscription 吉祥物：彗星领航员">
+</p>
+
 # DSH Grok Subscription — 在 DeepSeek Harness 使用 SuperGrok / X Premium 订阅
 
 <div align="center">
