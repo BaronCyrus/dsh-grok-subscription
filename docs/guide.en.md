@@ -18,7 +18,7 @@ dsh plugin --profile web list dsh-grok-subscription --depth 0
 For reproducibility, pin a published version, for example:
 
 ```sh
-dsh plugin --profile web add dsh-grok-subscription@1.1.3
+dsh plugin --profile web add dsh-grok-subscription@1.2.0
 ```
 
 **Install from GitHub:**
@@ -80,7 +80,7 @@ These exact IDs come from `IMAGE_INPUT_MODEL_IDS` in [constants.js](../src/const
 
 Paste or attach an image in the composer. DSH's attachment service processes it within pixel and byte budgets; over-budget images may degrade to a text description. Do not assume every image is sent at its original resolution.
 
-Both the host's pi-ai adapter and the bundled fallback have image-handling paths, but both depend on the host attachment capability. The **Active path** row in Settings shows the adapter and whether image input is available. After an update, a refreshed browser can still be using an old adapter if the Host was not restarted.
+From 1.2.0 the plugin runs the host's official pi-ai adapter, which owns the image pipeline (attachment resolution plus pixel and byte budgets). The bundled adapter stays as the automatic fallback: it is what serves the route if the pi-ai packages are missing, or if the Host refuses the hand-over. The **Active path** row in Settings names the adapter actually serving the route, and whether image input is available. After an update, a refreshed browser can still be using an old adapter if the Host was not restarted. To pin the bundled adapter deliberately — for instance if a Host adapter misbehaves on your account — set `DSH_GROK_ADAPTER=fallback` in `~/.dsh/.env` and restart DSH.
 
 ## Quota and caching
 
@@ -88,7 +88,7 @@ Usage is read through the undocumented `/v1/billing?format=credits` endpoint and
 
 The composer badge appears only for `grok-build` with a successful usage read; hover or click for weekly quota and its reset time. Missing data does not mean zero quota. A failed read does not invent percentages or independently block chat.
 
-For prefix caching, the plugin keeps a stable `prompt_cache_key` and tool ordering within a DSH session, and the bundled adapter preserves `reasoning.encrypted_content`. These are request-construction measures, not a guarantee of backend cache hits or quota savings. No invented hit rate is reported. See [adapter.js](../src/adapter.js).
+For prefix caching, the plugin pins one stable `prompt_cache_key` per DSH session on **both** adapter paths — the bundled adapter builds it, and on the host's pi-ai path the plugin assigns the same `grok:<sessionId>` value into the request. Tool ordering stays stable. Auxiliary requests (compaction, session titles) share the session's key rather than taking a separate one; measured against the proxy, isolating them did not improve the chat prefix's cache reads. These are request-construction measures, not a guarantee of backend cache hits or quota savings. No invented hit rate is reported. See [adapter.js](../src/adapter.js).
 
 ## Headless usage
 
@@ -134,7 +134,7 @@ In the desktop app the `desktop` profile is owned exclusively by the Electron ap
 
 ```sh
 cd "$HOME/.dsh/profiles/desktop"    # Windows: cd "$env:USERPROFILE\.dsh\profiles\desktop"
-pnpm add --save-exact dsh-grok-subscription@1.1.3
+pnpm add --save-exact dsh-grok-subscription@1.2.0
 ```
 
 Then quit and restart the desktop app completely. After a successful update the profile's `package.json` dependency should show the target version while its `dsh.profile.bundles` entry is unchanged. Refreshing the browser is not enough: without a Host restart the old version keeps loading.

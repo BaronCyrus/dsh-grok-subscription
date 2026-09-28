@@ -878,18 +878,36 @@ function buildAuthConfig() {
 
 
 /**
- * Force include=reasoning.encrypted_content on every Responses call.
- * pi-ai hard-codes that include for provider "xai" only; grok-build talks to the
- * same family of reasoning models and needs the ciphertext for multi-turn replay.
+ * Pin the request semantics this plugin owns on the pi-ai path.
+ *
+ * pi-ai assembles the Responses `params` itself and then assigns
+ * `options.samplingParams` over the result — the last step of `buildParams` in
+ * `@earendil-works/pi-ai/dist/api/openai-responses.js` — so this wrapper is the
+ * one seam where the plugin can state two fields without forking pi-ai:
+ *
+ * - `include`: pi-ai hard-codes `reasoning.encrypted_content` for its own `xai`
+ *   provider id only, and this route is `grok-build`, so without it multi-turn
+ *   assistant text vanishes.
+ * - `prompt_cache_key`: the bundled adapter namespaces the key as
+ *   `grok:<sessionId>`. Pinning the same value keeps a conversation's cache
+ *   warm across the upgrade to this adapter, and keeps the documented "one DSH
+ *   session, one stable key" promise independent of pi-ai's own default.
+ *
+ * A profile that disables caching (`cacheRetention: 'none'`) keeps pi-ai's
+ * decision: the plugin never switches back on a cache the host turned off.
  */
-function withEncryptedReasoningInclude(api) {
-  const inject = options => ({
-    ...options,
-    samplingParams: {
-      ...options?.samplingParams,
-      include: ['reasoning.encrypted_content'],
-    },
-  })
+function withGrokRequestSemantics(api) {
+  const inject = options => {
+    const cacheKey = options?.cacheRetention === 'none' ? undefined : promptCacheKey(options)
+    return {
+      ...options,
+      samplingParams: {
+        ...options?.samplingParams,
+        include: ['reasoning.encrypted_content'],
+        ...(cacheKey === undefined ? {} : { prompt_cache_key: cacheKey }),
+      },
+    }
+  }
   return {
     stream: (model, context, options) => api.stream(model, context, inject(options)),
     streamSimple: (model, context, options) => api.streamSimple(model, context, inject(options)),
@@ -958,7 +976,7 @@ export async function createGrokBuildAdapter(session, options = {}) {
   }
   // pi-ai only auto-sets include for provider id "xai"; grok-build needs the same
   // encrypted reasoning replay so turn 2+ keeps visible assistant text.
-  responsesApi = withEncryptedReasoningInclude(responsesApi)
+  responsesApi = withGrokRequestSemantics(responsesApi)
 
   const store = createStore(session)
   const authModels = piAi.createModels({
@@ -1060,4 +1078,4 @@ export async function createGrokBuildAdapter(session, options = {}) {
   }
 }
 
-export { createDuckAdapter, responsesInput, withEncryptedReasoningInclude, wrapAsHostAdapter }
+export { createDuckAdapter, responsesInput, withGrokRequestSemantics, wrapAsHostAdapter }

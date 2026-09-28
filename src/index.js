@@ -32,6 +32,66 @@ function softService(ctx, key) {
 }
 
 /**
+ * Claim this plugin's provider route and return the host's release handle.
+ *
+ * `ctx.llm.registerAdapter` refuses a second adapter for a provider that
+ * already has one (`DUPLICATE_ADAPTER`, all-or-nothing) in every release this
+ * plugin supports, so the route must be released before the pi-ai upgrade can
+ * take it over.
+ */
+function registerProviderAdapter(ctx, adapter) {
+  const handle = ctx.llm.registerAdapter([PROVIDER_ID], adapter)
+  return typeof handle === 'function' ? handle : undefined
+}
+
+/**
+ * Hand the route from the synchronously registered bundled adapter to the
+ * host's official pi-ai adapter.
+ *
+ * Release and re-register in one synchronous step, so no request can observe
+ * the route unserved, and restore the bundled adapter if the host refuses the
+ * replacement: a Settings page that says "bundled fallback" is honest, a
+ * provider route that streams nothing is not.
+ *
+ * @param ctx - plugin scope owning both registrations.
+ * @param adapter - the prepared pi-ai adapter.
+ * @param registration - mutable holder of the live adapter and its release handle.
+ */
+function upgradeProviderAdapter(ctx, adapter, registration) {
+  const previous = registration.adapter
+  registration.release?.()
+  registration.release = undefined
+  registration.adapter = undefined
+  try {
+    registration.release = registerProviderAdapter(ctx, adapter)
+    registration.adapter = adapter
+  } catch (error) {
+    if (previous !== undefined) {
+      try {
+        registration.release = registerProviderAdapter(ctx, previous)
+        registration.adapter = previous
+      } catch {
+        registration.release = undefined
+      }
+    }
+    throw error
+  }
+}
+
+/**
+ * Documented rollback: `DSH_GROK_ADAPTER=fallback` keeps the bundled adapter
+ * even where the host's official one is available, so a host adapter that
+ * misbehaves in real use can be switched off without waiting for a release.
+ * Set it in DSH's own environment (`~/.dsh/.env`), not the project's.
+ */
+export function adapterOverride(env = process.env) {
+  const value = typeof env?.DSH_GROK_ADAPTER === 'string'
+    ? env.DSH_GROK_ADAPTER.trim().toLowerCase()
+    : ''
+  return value === 'fallback' ? 'fallback' : undefined
+}
+
+/**
  * Lazily resolve the host's durable attachment store. It may register after
  * this plugin, and it is only consulted when a request carries an image.
  */
@@ -97,13 +157,16 @@ export function apply(ctx, options = {}) {
   const resolveAttachments = attachmentResolver(ctx)
 
   const createSync = options.createSync ?? createGrokBuildAdapterSync
+  /** The adapter serving the route now, and the handle that releases it. */
+  const registration = { adapter: undefined, release: undefined }
   // Register a duck host adapter synchronously so apply returns immediately
   // and the plugin list / Settings RPC are never blocked on pi-ai imports.
   try {
     const created = createSync(session, { resolveAttachments })
     if (created.note) ctx.logger?.debug?.(created.note)
     adapterState.kind = created.kind
-    ctx.llm.registerAdapter([PROVIDER_ID], created.adapter)
+    registration.adapter = created.adapter
+    registration.release = registerProviderAdapter(ctx, created.adapter)
     // Catalog notify deferred so pickers refresh without re-entering apply.
     notifyCatalogChange()
   } catch (error) {
@@ -114,8 +177,11 @@ export function apply(ctx, options = {}) {
   }
 
   const defer = options.defer ?? scheduleDeferred
+  const deferredOptions = adapterOverride() === 'fallback'
+    ? { ...options, skipUpgrade: true }
+    : options
   defer(() => {
-    void deferredBoot(ctx, session, notifyCatalogChange, options, adapterState)
+    void deferredBoot(ctx, session, notifyCatalogChange, deferredOptions, adapterState, registration)
   })
 
   ctx.inject(['connection'], connectionContext => connectionContext.effect(
@@ -124,7 +190,7 @@ export function apply(ctx, options = {}) {
   ))
 }
 
-async function deferredBoot(ctx, session, notifyCatalogChange, options = {}, adapterState) {
+async function deferredBoot(ctx, session, notifyCatalogChange, options = {}, adapterState, registration) {
   if (!options.skipSettings) {
     await tryRegisterSettings(ctx)
   }
@@ -160,7 +226,10 @@ async function deferredBoot(ctx, session, notifyCatalogChange, options = {}, ada
     const created = await createAsync(session, { ...options.adapterOptions, resolveAttachments: attachmentResolver(ctx) })
     if (created.kind === 'pi-ai') {
       if (created.note) ctx.logger?.warn?.(created.note)
-      ctx.llm.registerAdapter([PROVIDER_ID], created.adapter)
+      // The bundled adapter already owns the route: hand it over instead of
+      // re-registering, which the host refuses with DUPLICATE_ADAPTER.
+      if (registration) upgradeProviderAdapter(ctx, created.adapter, registration)
+      else ctx.llm.registerAdapter([PROVIDER_ID], created.adapter)
       if (adapterState) {
         adapterState.kind = created.kind
         adapterState.upgraded = true
@@ -196,4 +265,13 @@ async function tryRegisterSettings(ctx) {
   }
 }
 
-export { PROVIDER_ID, DISPLAY_NAME, DISPLAY_NAME_ZH, deferredBoot, softService, scheduleDeferred }
+export {
+  PROVIDER_ID,
+  DISPLAY_NAME,
+  DISPLAY_NAME_ZH,
+  deferredBoot,
+  registerProviderAdapter,
+  softService,
+  scheduleDeferred,
+  upgradeProviderAdapter,
+}

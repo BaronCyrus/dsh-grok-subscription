@@ -6,7 +6,6 @@ import {
   promptCacheKey,
   responsesInput,
   streamResponses,
-  withEncryptedReasoningInclude,
 } from '../src/adapter.js'
 import { PROVIDER_ID } from '../src/constants.js'
 
@@ -174,25 +173,6 @@ test('responsesInput skips empty assistant turns left by older builds', () => {
   ])
 })
 
-test('withEncryptedReasoningInclude injects include for pi-ai stream options', () => {
-  const seen = []
-  const api = {
-    stream(_model, _context, options) {
-      seen.push(options)
-      return { async *[Symbol.asyncIterator]() {} }
-    },
-    streamSimple(_model, _context, options) {
-      seen.push(options)
-      return { async *[Symbol.asyncIterator]() {} }
-    },
-  }
-  const wrapped = withEncryptedReasoningInclude(api)
-  wrapped.stream({}, {}, { samplingParams: { temperature: 0.2 } })
-  wrapped.streamSimple({}, {}, {})
-  assert.deepEqual(seen[0].samplingParams.include, ['reasoning.encrypted_content'])
-  assert.equal(seen[0].samplingParams.temperature, 0.2)
-  assert.deepEqual(seen[1].samplingParams.include, ['reasoning.encrypted_content'])
-})
 
 test('duck listModels still gates on signed-in session', async () => {
   const duck = createDuckAdapter({

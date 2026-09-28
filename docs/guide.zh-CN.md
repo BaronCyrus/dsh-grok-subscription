@@ -18,7 +18,7 @@ dsh plugin --profile web list dsh-grok-subscription --depth 0
 需要可重复安装时，固定已发布版本，例如：
 
 ```sh
-dsh plugin --profile web add dsh-grok-subscription@1.1.3
+dsh plugin --profile web add dsh-grok-subscription@1.2.0
 ```
 
 **GitHub 来源安装：**
@@ -80,7 +80,7 @@ grok-4.6
 
 在输入框粘贴或附加图片后，DSH 的附件服务会按像素与体积预算处理。图片超出可用预算时可能降级为文本说明；不要假设每张原图都以原始分辨率发出。
 
-宿主官方 pi-ai 适配器和内置回退适配器都有对应图片通路，但都依赖宿主附件能力。设置页的 **运行通路** 会显示当前适配器和图片输入是否可用。更新后只有界面刷新、Host 未重启时，可能仍运行旧适配器。
+1.2.0 起，插件默认运行宿主官方的 pi-ai 适配器，图片通路（附件解析与像素、体积预算）由它负责。内置适配器保留为自动回退：pi-ai 相关包缺失、或宿主拒绝交接时，仍由它服务该路由。设置页的 **运行通路** 会显示实际在服务的适配器和图片输入是否可用。更新后只有界面刷新、Host 未重启时，可能仍运行旧适配器。若要主动固定在内置适配器（例如宿主适配器在你的账号上表现异常），在 `~/.dsh/.env` 里设置 `DSH_GROK_ADAPTER=fallback` 并重启 DSH。
 
 ## 额度与缓存
 
@@ -88,7 +88,7 @@ grok-4.6
 
 输入框徽章仅在当前 provider 为 `grok-build` 且用量读取成功时显示，悬停或点击查看每周余量与重置时间。缺失数据不是额度为零；读取失败不会编造百分比，也不会因为单独的额度读取故障阻止聊天。
 
-前缀缓存方面，插件为同一 DSH 会话保持稳定的 `prompt_cache_key` 和工具顺序，内置回退适配器保留 `reasoning.encrypted_content`。这些是请求构造措施，不保证服务端缓存命中或节省额度；项目不提供虚构的命中率。实现见 [adapter.js](../src/adapter.js)。
+前缀缓存方面，插件在**两条通路**上都为同一 DSH 会话固定同一个 `prompt_cache_key`：内置适配器自行构造，宿主 pi-ai 通路上插件把同样的 `grok:<sessionId>` 注入请求；工具顺序保持稳定。压缩、会话标题这类辅助请求与会话共用同一个 key，而不是另开一个——对代理实测下来，隔离它们并不会提高聊天前缀的缓存命中。这些是请求构造措施，不保证服务端缓存命中或节省额度；项目不提供虚构的命中率。实现见 [adapter.js](../src/adapter.js)。
 
 ## Headless 使用
 
@@ -134,7 +134,7 @@ npm 安装可在设置页更新，或运行 `dsh plugin --profile web add dsh-gr
 
 ```sh
 cd "$HOME/.dsh/profiles/desktop"    # Windows: cd "$env:USERPROFILE\.dsh\profiles\desktop"
-pnpm add --save-exact dsh-grok-subscription@1.1.3
+pnpm add --save-exact dsh-grok-subscription@1.2.0
 ```
 
 然后完全退出并重启桌面版。更新成功后该 profile 的 `package.json` 里依赖应变为目标版本，`dsh.profile.bundles` 条目保持不变。仅刷新网页不够：Host 未重启时仍会加载旧版本。
