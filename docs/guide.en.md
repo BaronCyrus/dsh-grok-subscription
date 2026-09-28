@@ -18,7 +18,7 @@ dsh plugin --profile web list dsh-grok-subscription --depth 0
 For reproducibility, pin a published version, for example:
 
 ```sh
-dsh plugin --profile web add dsh-grok-subscription@1.1.1
+dsh plugin --profile web add dsh-grok-subscription@1.1.2
 ```
 
 **Install from GitHub:**
@@ -40,7 +40,7 @@ Restart the target DSH instance after installation. For local diagnosis, `dsh --
 
 ## Sign-in and credentials
 
-**The official Grok Build CLI must be available on the DSH Host**, not just on the phone or another computer viewing the Web UI. The plugin checks `DSH_GROK_BIN`, then `${GROK_HOME:-$HOME/.grok}/bin/grok`, then `grok` on `PATH`. See [session.js](../src/session.js).
+**The official Grok Build CLI must be available on the DSH Host**, not just on the phone or another computer viewing the Web UI. The plugin checks `DSH_GROK_BIN`, then `${GROK_HOME:-$HOME/.grok}/bin/grok`, then `grok` on `PATH`. On Windows the `PATHEXT` suffixes (`.exe`, `.cmd`, …) are completed too, so a `grok.exe` install is recognised. See [session.js](../src/session.js).
 
 Use **CLI login** or **Device-code login** in Settings. The plugin invokes the official CLI and shows the available authorization link and one-time code in the panel. Alternatively, run this locally:
 
@@ -110,7 +110,7 @@ That task makes a real model request and uses the selected service's quota; it i
 
 **`dsh` not found.** Use the full `npx` prefix you use to launch DSH, or check the installed launcher's path.
 
-**`grok` not found or no login window.** Check that the CLI is installed on the DSH Host and its process sees `DSH_GROK_BIN` / `PATH`. Look for a clickable login link in the panel. A browser failing to open does not by itself prove the authorization service is unreachable.
+**`grok` not found or no login window.** Check that the CLI is installed on the DSH Host and its process sees `DSH_GROK_BIN` / `PATH`. Look for a clickable login link in the panel. A browser failing to open does not by itself prove the authorization service is unreachable. On Windows, if the CLI is not on `PATH`, put the absolute `grok.exe` path in the user-level `DSH_GROK_BIN` (for example `setx DSH_GROK_BIN "C:\Users\<user>\.grok\bin\grok.exe"`) and restart DSH completely; note that `DSH_*` is a DSH bootstrap prefix, so declaring it in `~/.dsh/.env` makes that environment layer fail.
 
 **`fetch failed` or `Billing request timed out`.** Check access to the account service and `cli-chat-proxy.grok.com` separately. When a proxy is needed, set standard `https_proxy` / `http_proxy` variables in DSH's launch environment or `~/.dsh/.env`, not the project directory's `.env`, then manually restart DSH. The plugin uses the host network setup rather than providing its own proxy service. Network conditions are one possibility; also check authentication and backend errors.
 
@@ -132,7 +132,7 @@ In the desktop app the `desktop` profile is owned exclusively by the Electron ap
 
 ```sh
 cd "$HOME/.dsh/profiles/desktop"    # Windows: cd "$env:USERPROFILE\.dsh\profiles\desktop"
-pnpm add --save-exact dsh-grok-subscription@1.1.1
+pnpm add --save-exact dsh-grok-subscription@1.1.2
 ```
 
 Then quit and restart the desktop app completely. After a successful update the profile's `package.json` dependency should show the target version while its `dsh.profile.bundles` entry is unchanged. Refreshing the browser is not enough: without a Host restart the old version keeps loading.

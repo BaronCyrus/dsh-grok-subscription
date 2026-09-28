@@ -18,7 +18,7 @@ dsh plugin --profile web list dsh-grok-subscription --depth 0
 需要可重复安装时，固定已发布版本，例如：
 
 ```sh
-dsh plugin --profile web add dsh-grok-subscription@1.1.1
+dsh plugin --profile web add dsh-grok-subscription@1.1.2
 ```
 
 **GitHub 来源安装：**
@@ -40,7 +40,7 @@ npx -y @deepseek-ai/dsh@0.1.5-rc.2 plugin --profile web list dsh-grok-subscripti
 
 ## 登录与凭据
 
-**官方 Grok Build CLI 必须在 DSH Host 上可用**，不是只安装在访问网页的手机或另一台电脑上。插件按以下顺序寻找命令：`DSH_GROK_BIN` 指定的路径、`${GROK_HOME:-$HOME/.grok}/bin/grok`、系统 `PATH` 中的 `grok`。实现见 [session.js](../src/session.js)。
+**官方 Grok Build CLI 必须在 DSH Host 上可用**，不是只安装在访问网页的手机或另一台电脑上。插件按以下顺序寻找命令：`DSH_GROK_BIN` 指定的路径、`${GROK_HOME:-$HOME/.grok}/bin/grok`、系统 `PATH` 中的 `grok`。Windows 上按 `PATHEXT` 补全后缀（`.exe`、`.cmd` 等），所以安装成 `grok.exe` 也能识别。实现见 [session.js](../src/session.js)。
 
 可在设置页发起 **CLI 登录** 或 **设备码登录**；插件会调用官方 CLI，并将可用的授权链接和一次性验证码显示在面板中。也可以自行在本机运行：
 
@@ -110,7 +110,7 @@ dsh --profile headless "只回复：ok"
 
 **找不到 `dsh`。** 使用你运行 DSH 时的完整 `npx` 前缀，或检查已安装启动器的命令路径。
 
-**找不到 `grok` / 不弹出登录窗口。** 检查 CLI 是否安装在 DSH Host、`DSH_GROK_BIN` / `PATH` 是否对该进程可见，以及面板是否已显示可点击授权链接。浏览器没有弹出，不一定等于授权服务不可达。
+**找不到 `grok` / 不弹出登录窗口。** 检查 CLI 是否安装在 DSH Host、`DSH_GROK_BIN` / `PATH` 是否对该进程可见，以及面板是否已显示可点击授权链接。浏览器没有弹出，不一定等于授权服务不可达。Windows 上若 CLI 不在 `PATH` 中，可把 `grok.exe` 的绝对路径写入用户级 `DSH_GROK_BIN`（例如 `setx DSH_GROK_BIN "C:\Users\<用户>\.grok\bin\grok.exe"`），再完全重启 DSH；注意 `DSH_*` 是 DSH 的 bootstrap 前缀，写进 `~/.dsh/.env` 会让该环境层直接报错。
 
 **`fetch failed` / `Billing request timed out`。** 分别检查账号服务和 `cli-chat-proxy.grok.com` 的网络连接。需要代理时，在 DSH 启动环境或 `~/.dsh/.env` 中设置标准 `https_proxy` / `http_proxy`，而不是放进项目目录的 `.env`；再手动重启 DSH。插件沿用宿主网络配置，不提供单独代理服务。网络只是可能原因，还应检查认证和服务端错误。
 
@@ -132,7 +132,7 @@ npm 安装可在设置页更新，或运行 `dsh plugin --profile web add dsh-gr
 
 ```sh
 cd "$HOME/.dsh/profiles/desktop"    # Windows: cd "$env:USERPROFILE\.dsh\profiles\desktop"
-pnpm add --save-exact dsh-grok-subscription@1.1.1
+pnpm add --save-exact dsh-grok-subscription@1.1.2
 ```
 
 然后完全退出并重启桌面版。更新成功后该 profile 的 `package.json` 里依赖应变为目标版本，`dsh.profile.bundles` 条目保持不变。仅刷新网页不够：Host 未重启时仍会加载旧版本。

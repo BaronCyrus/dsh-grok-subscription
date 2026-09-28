@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.1.2 — 2026-09-28
+
+- Fix **Windows reporting "no grok CLI"** with the official CLI installed. Detection probed for a file literally named `grok`, but `fs.existsSync` never applies Windows' `PATHEXT` resolution, so the installed `grok.exe` was invisible: `resolveGrokBin()` fell back to the bare name, `grokCliAvailable()` returned `false`, and every CLI-backed path — session pull, CLI/device-code login, automatic renewal — was short-circuited before it ran. Settings showed the orange "CLI not found" warning and the plugin stayed on its built-in fallback adapter, even though `spawn("grok")` itself works on Windows.
+- Probe every name the platform would run. The Windows branch now tries the `PATHEXT` suffixes (defaulting to `.COM;.EXE;.BAT;.CMD` when `PATHEXT` is absent) for an explicit `DSH_GROK_BIN` path, for the `${GROK_HOME:-%USERPROFILE%\.grok}\bin\grok` install, and for every `PATH` entry, and it reads quoted entries such as `"C:\Program Files\…"`. Resolution and execution agree, because the existing `grok.exe` found by the probe is the path that gets spawned.
+- Make the platform injectable in both helpers so the Windows branch runs on any CI OS. `tests/cli-detection.test.mjs` adds 13 cases — the two requested by the report, `PATHEXT` handling, quoted `PATH`, and a real-temp-directory `grok.exe` smoke test — and asserts unchanged POSIX behaviour.
+- No session, login, renewal, model-routing, proxy, or quota behaviour changes. A repository-wide sweep of the remaining `existsSync`/`spawn` path joins found no other defect of this class. Restart DSH fully after updating.
+
 ## 1.1.1 — 2026-09-28
 
 - Fix **Update plugin** failing in the desktop app. The update built its command from `process.argv[1]`, which is the entry script of whichever process loaded the plugin — the `dsh` CLI only when the host *is* the CLI. The desktop app loads plugins inside `@deepseek-ai/dsh-desktop-host`, so that argument was the desktop host entry and the update relaunched the application with `plugin …` as script arguments instead of installing anything. The version check kept working, so the update button appeared to run and then reported failure.

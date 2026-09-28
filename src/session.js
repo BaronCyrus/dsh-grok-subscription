@@ -14,18 +14,83 @@ import { loadCatalog as defaultLoadCatalog } from './catalog.js'
 import { fetchBillingUsage as defaultFetchBillingUsage, unavailableUsage } from './usage.js'
 import { optionalImport } from './adapter.js'
 
-export function resolveGrokBin(env = process.env, exists = existsSync) {
-  if (typeof env.DSH_GROK_BIN === 'string' && env.DSH_GROK_BIN.trim()) return env.DSH_GROK_BIN.trim()
+/**
+ * Suffixes Windows appends when resolving a bare command, used only when
+ * `PATHEXT` is missing or empty.
+ */
+const WINDOWS_EXEC_EXTENSIONS = ['.COM', '.EXE', '.BAT', '.CMD']
+
+const hasPathSeparator = value => value.includes('/') || value.includes('\\')
+
+/**
+ * Every file name the platform would accept for one command. `fs.existsSync`
+ * never applies Windows' `PATHEXT` resolution, so probing `grok` misses the
+ * installed `grok.exe`; the suffixes `spawn` can run have to be tried
+ * explicitly, and `PATHEXT` decides which ones — exactly as it does for `spawn`.
+ */
+function executableNames(bin, platform, env) {
+  if (platform !== 'win32') return [bin]
+  const declared = String(env.PATHEXT ?? '')
+    .split(';')
+    .map(part => part.trim())
+    .filter(Boolean)
+    .map(part => (part.startsWith('.') ? part : `.${part}`))
+  const extensions = declared.length > 0 ? declared : WINDOWS_EXEC_EXTENSIONS
+  return [bin, ...extensions.map(extension => `${bin}${extension}`)]
+}
+
+function firstExisting(names, exists) {
+  for (const name of names) if (exists(name)) return name
+  return undefined
+}
+
+/** Quotes are PATH syntax on Windows (`"C:\Program Files\…"`), not part of the path. */
+function pathEntry(dir, platform) {
+  return platform === 'win32' && dir.length > 1 && dir.startsWith('"') && dir.endsWith('"')
+    ? dir.slice(1, -1)
+    : dir
+}
+
+/**
+ * The CLI to spawn: an explicit `DSH_GROK_BIN`, else the one installed in the
+ * Grok home, else the bare command name for `PATH` lookup.
+ * @param env - environment holding `DSH_GROK_BIN`, `GROK_HOME`, and `PATHEXT`.
+ * @param exists - injectable existence probe.
+ * @param platform - injectable platform, so the Windows branch is testable anywhere.
+ * @returns an existing path when one is found, otherwise a name for `spawn` to resolve.
+ */
+export function resolveGrokBin(env = process.env, exists = existsSync, platform = process.platform) {
+  const override = typeof env.DSH_GROK_BIN === 'string' && env.DSH_GROK_BIN.trim()
+    ? env.DSH_GROK_BIN.trim()
+    : undefined
+  if (override !== undefined) {
+    // A bare override is a command name for `spawn`; a path is completed with
+    // the platform's executable suffixes so detection and spawn agree.
+    if (!hasPathSeparator(override)) return override
+    return firstExisting(executableNames(override, platform, env), exists) ?? override
+  }
   const local = join(grokHome(env), 'bin', 'grok')
-  if (exists(local)) return local
+  const installed = firstExisting(executableNames(local, platform, env), exists)
+  if (installed !== undefined) return installed
   return 'grok'
 }
 
-export function grokCliAvailable(env = process.env, exists = existsSync) {
-  const bin = resolveGrokBin(env, exists)
-  if (bin.includes('/') || bin.includes('\\')) return exists(bin)
-  const delimiter = process.platform === 'win32' ? ';' : ':'
-  return String(env.PATH ?? '').split(delimiter).some(dir => dir && exists(join(dir, bin)))
+/**
+ * Whether the official CLI can run here. Windows installs it as `grok.exe`
+ * while `DSH_GROK_BIN` and `PATH` name it `grok`, so the probe — not the spawn,
+ * which resolves the suffix itself — is what has to try every suffix.
+ * @param env - environment holding `DSH_GROK_BIN`, `GROK_HOME`, `PATH`, and `PATHEXT`.
+ * @param exists - injectable existence probe.
+ * @param platform - injectable platform, so the Windows branch is testable anywhere.
+ */
+export function grokCliAvailable(env = process.env, exists = existsSync, platform = process.platform) {
+  const bin = resolveGrokBin(env, exists, platform)
+  if (hasPathSeparator(bin)) return exists(bin)
+  const delimiter = platform === 'win32' ? ';' : ':'
+  const names = executableNames(bin, platform, env)
+  return String(env.PATH ?? '')
+    .split(delimiter)
+    .some(dir => dir && names.some(name => exists(join(pathEntry(dir, platform), name))))
 }
 
 /**
