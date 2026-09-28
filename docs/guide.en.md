@@ -6,7 +6,7 @@ For quick setup, see the [README](../README.en.md#install). This guide covers de
 
 ## Installation and compatibility
 
-You need DeepSeek Harness, the official Grok Build CLI, and an account with Grok Build access. The plugin declares Node.js `^22.19.0 || >=24.0.0`; DSH peers use `^0.1.5-rc.2`. See [package.json](../package.json) for the full requirements. Declared compatibility is not a claim that every version has passed live verification.
+You need DeepSeek Harness, the official Grok Build CLI, and an account with Grok Build access. The plugin declares Node.js `^22.19.0 || >=24.0.0`; DSH peers use `>=0.1.5-rc.2 <0.3.0-0`, which spans the whole 0.1 and 0.2 lines. See [package.json](../package.json) for the full requirements. Declared compatibility is not a claim that every version has passed live verification.
 
 **Install from npm:**
 
@@ -18,7 +18,7 @@ dsh plugin --profile web list dsh-grok-subscription --depth 0
 For reproducibility, pin a published version, for example:
 
 ```sh
-dsh plugin --profile web add dsh-grok-subscription@1.1.2
+dsh plugin --profile web add dsh-grok-subscription@1.1.3
 ```
 
 **Install from GitHub:**
@@ -124,6 +124,8 @@ That task makes a real model request and uses the selected service's quota; it i
 
 **No response on an old release.** Version `1.0.0` had a tool-call serialization defect fixed in `1.0.1`; older versions may also lack later renewal fixes. Update to the current published version before diagnosing a persistent problem rather than attributing every missing response to that old defect.
 
+**The plugin vanished from Settings after a DSH update.** From 0.2.0 DSH refuses a plugin whose `@deepseek-ai/dsh*` peer ranges do not admit the running version, and it drops the whole bundle before any plugin code loads: no `grok-build` route, no Settings section, and nothing in the panel to explain it. The Host writes `skipping profile bundle "dsh-grok-subscription"` to its own stderr, and `dsh --profile web --dump-config` omits the `grok-subscription` row. Update the plugin rather than granting a version exemption: an exemption re-enables a build that was never checked against that Host.
+
 ## Updates and sign-out
 
 For npm installs, update in Settings or run `dsh plugin --profile web add dsh-grok-subscription@latest`. For GitHub-source installs, run `dsh plugin --profile web update dsh-grok-subscription`. For local links, pull, test, and rebuild the checkout. Restart DSH afterwards.
@@ -132,7 +134,7 @@ In the desktop app the `desktop` profile is owned exclusively by the Electron ap
 
 ```sh
 cd "$HOME/.dsh/profiles/desktop"    # Windows: cd "$env:USERPROFILE\.dsh\profiles\desktop"
-pnpm add --save-exact dsh-grok-subscription@1.1.2
+pnpm add --save-exact dsh-grok-subscription@1.1.3
 ```
 
 Then quit and restart the desktop app completely. After a successful update the profile's `package.json` dependency should show the target version while its `dsh.profile.bundles` entry is unchanged. Refreshing the browser is not enough: without a Host restart the old version keeps loading.

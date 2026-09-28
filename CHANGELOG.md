@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.1.3 — 2026-09-28
+
+- Fix **the plugin disappearing from the desktop app after it updated to DSH 0.2.0-rc.1**. DSH 0.2.0 gates every profile entry on the plugin's `@deepseek-ai/dsh*` peer ranges (`evaluatePluginCompatibility` in `@deepseek-ai/dsh-app-boot`) and drops the whole bundle before any plugin code loads when one of them does not admit the running version. This plugin declared `^0.1.5-rc.2`, which is `<0.2.0`, so the Host reported `skipping profile bundle "dsh-grok-subscription": Plugin dsh-grok-subscription@1.1.2 is incompatible with dsh 0.2.0-rc.1` and started without a `grok-build` route, without a Settings section, and without any error in the UI. Reproduced against the real desktop runtime, and confirmed fixed with the same `dsh --profile <name> --dump-config`: the composition now emits the `grok-subscription` row.
+- Widen each DSH peer to `>=0.1.5-rc.2 <0.3.0-0`: a span across the 0.1 and 0.2 lines rather than a range that silently expires on the next Host bump. Nothing the previous range admitted is dropped, and 0.3.0 prereleases stay refused, so the next minor gets a fresh verification instead of another silent removal.
+- Verified on the real 0.2.0-rc.1 desktop runtime with a live Host: `grok-subscription/status` and `grok-subscription/plugin/version` answer over the Host's own `/api` routes, the account is signed in, the live catalog lists all four models, the weekly quota reads, and a minimal live generation through the registered route returned a complete stream (`OK`, `finish: stop`, usage). No model-routing, authentication, proxy, or quota changes: the adapter this release runs is the same one 1.1.2 ran.
+- `tests/host-compatibility.test.mjs` checks every DSH peer against a runtime matrix (0.1.5-rc.2 … 0.2.14 admitted, 0.3.0 prereleases refused) and pins the shared span; it fails against 1.1.2.
+- Add a Troubleshooting entry to both guides for the next time a Host update removes the plugin: where the Host reports it, and why a version exemption is the wrong remedy.
+- Restart DSH fully after updating.
+
 ## 1.1.2 — 2026-09-28
 
 - Fix **Windows reporting "no grok CLI"** with the official CLI installed. Detection probed for a file literally named `grok`, but `fs.existsSync` never applies Windows' `PATHEXT` resolution, so the installed `grok.exe` was invisible: `resolveGrokBin()` fell back to the bare name, `grokCliAvailable()` returned `false`, and every CLI-backed path — session pull, CLI/device-code login, automatic renewal — was short-circuited before it ran. Settings showed the orange "CLI not found" warning and the plugin stayed on its built-in fallback adapter, even though `spawn("grok")` itself works on Windows.

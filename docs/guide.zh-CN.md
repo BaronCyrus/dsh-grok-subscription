@@ -6,7 +6,7 @@
 
 ## 安装与兼容性
 
-需要 DeepSeek Harness、官方 Grok Build CLI，以及当前具有 Grok Build 使用资格的订阅账号。插件的 Node.js 要求为 `^22.19.0 || >=24.0.0`，DSH peer 声明以 [package.json](../package.json) 为准；其中 DSH 依赖使用 `^0.1.5-rc.2`。声明范围不等于所有版本都已经过实机验证。
+需要 DeepSeek Harness、官方 Grok Build CLI，以及当前具有 Grok Build 使用资格的订阅账号。插件的 Node.js 要求为 `^22.19.0 || >=24.0.0`，DSH peer 声明以 [package.json](../package.json) 为准；其中 DSH 依赖使用 `>=0.1.5-rc.2 <0.3.0-0`，覆盖 0.1 与 0.2 全线。声明范围不等于所有版本都已经过实机验证。
 
 **npm 安装：**
 
@@ -18,7 +18,7 @@ dsh plugin --profile web list dsh-grok-subscription --depth 0
 需要可重复安装时，固定已发布版本，例如：
 
 ```sh
-dsh plugin --profile web add dsh-grok-subscription@1.1.2
+dsh plugin --profile web add dsh-grok-subscription@1.1.3
 ```
 
 **GitHub 来源安装：**
@@ -124,6 +124,8 @@ dsh --profile headless "只回复：ok"
 
 **旧版本发消息无回复。** `1.0.0` 存在已在 `1.0.1` 修正的工具调用序列化问题；旧版本也可能缺少后续续期修复。先更新到当前发布版，再定位仍然存在的问题，不要把所有无回复都归因于旧缺陷。
 
+**DSH 更新后插件从设置页消失。** 0.2.0 起，插件的 `@deepseek-ai/dsh*` peer 范围若不包含当前运行版本，DSH 会在加载任何插件代码之前丢掉整个 bundle：既没有 `grok-build` 路由，也没有设置分区，界面里没有任何提示。Host 自己的 stderr 会输出 `skipping profile bundle "dsh-grok-subscription"`，`dsh --profile web --dump-config` 里也不会出现 `grok-subscription` 行。此时应更新插件，而不是授予版本豁免——豁免会重新启用一个从未针对该 Host 验证过的构建。
+
 ## 更新与登出
 
 npm 安装可在设置页更新，或运行 `dsh plugin --profile web add dsh-grok-subscription@latest`。GitHub 来源安装可运行 `dsh plugin --profile web update dsh-grok-subscription`。本地链接安装则拉取对应 checkout、测试并构建。更新后手动重启 DSH。
@@ -132,7 +134,7 @@ npm 安装可在设置页更新，或运行 `dsh plugin --profile web add dsh-gr
 
 ```sh
 cd "$HOME/.dsh/profiles/desktop"    # Windows: cd "$env:USERPROFILE\.dsh\profiles\desktop"
-pnpm add --save-exact dsh-grok-subscription@1.1.2
+pnpm add --save-exact dsh-grok-subscription@1.1.3
 ```
 
 然后完全退出并重启桌面版。更新成功后该 profile 的 `package.json` 里依赖应变为目标版本，`dsh.profile.bundles` 条目保持不变。仅刷新网页不够：Host 未重启时仍会加载旧版本。
