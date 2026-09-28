@@ -130,6 +130,8 @@ dsh plugin --profile web add dsh-grok-subscription@latest
 
 GitHub 来源安装可使用 `dsh plugin --profile web update dsh-grok-subscription`；本地 `link:` 安装应拉取对应仓库并重新构建，不要替换开发链接。
 
+桌面版由 Electron 应用独占 `desktop` profile，`dsh plugin --profile desktop …` 会被拒绝，因此桌面版的「更新插件」由插件自己在该 profile 目录中用 DSH 自带的 pnpm 安装精确版本；`1.1.1` 之前该按钮在桌面版必然失败，手动步骤见[更新与登出](docs/guide.zh-CN.md#更新与登出)。
+
 **卸载：**
 
 ```sh

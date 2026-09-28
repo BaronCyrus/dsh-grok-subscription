@@ -130,6 +130,8 @@ dsh plugin --profile web add dsh-grok-subscription@latest
 
 For a GitHub-source install, use `dsh plugin --profile web update dsh-grok-subscription`. For a local `link:` install, pull and rebuild the checkout instead of replacing its development link.
 
+The desktop app owns its `desktop` profile exclusively, so `dsh plugin --profile desktop …` is refused there. The desktop **Update plugin** button therefore installs the exact version inside that profile directory with DSH's own bundled pnpm; before `1.1.1` that button always failed in the desktop app. Manual steps: [Updates and sign-out](docs/guide.en.md#updates-and-sign-out).
+
 **Uninstall:**
 
 ```sh

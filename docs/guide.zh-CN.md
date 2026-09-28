@@ -18,7 +18,7 @@ dsh plugin --profile web list dsh-grok-subscription --depth 0
 需要可重复安装时，固定已发布版本，例如：
 
 ```sh
-dsh plugin --profile web add dsh-grok-subscription@1.1.0
+dsh plugin --profile web add dsh-grok-subscription@1.1.1
 ```
 
 **GitHub 来源安装：**
@@ -127,6 +127,15 @@ dsh --profile headless "只回复：ok"
 ## 更新与登出
 
 npm 安装可在设置页更新，或运行 `dsh plugin --profile web add dsh-grok-subscription@latest`。GitHub 来源安装可运行 `dsh plugin --profile web update dsh-grok-subscription`。本地链接安装则拉取对应 checkout、测试并构建。更新后手动重启 DSH。
+
+桌面版的 `desktop` profile 由 Electron 应用独占，`dsh plugin --profile desktop …` 会被直接拒绝（`profile "desktop" is managed exclusively by the Electron application`），所以桌面版只能由插件自己更新。1.1.1 起「更新插件」会在该 profile 目录中用 DSH 自带的 pnpm 安装精确版本；若你仍停留在旧版本且按钮报错，可在终端手动执行（pnpm 需 ≥ 11）：
+
+```sh
+cd "$HOME/.dsh/profiles/desktop"    # Windows: cd "$env:USERPROFILE\.dsh\profiles\desktop"
+pnpm add --save-exact dsh-grok-subscription@1.1.1
+```
+
+然后完全退出并重启桌面版。更新成功后该 profile 的 `package.json` 里依赖应变为目标版本，`dsh.profile.bundles` 条目保持不变。仅刷新网页不够：Host 未重启时仍会加载旧版本。
 
 卸载使用 `dsh plugin --profile web remove dsh-grok-subscription`。这不删除整个 profile、其他插件或 Grok CLI 的 `auth.json`。
 

@@ -18,7 +18,7 @@ dsh plugin --profile web list dsh-grok-subscription --depth 0
 For reproducibility, pin a published version, for example:
 
 ```sh
-dsh plugin --profile web add dsh-grok-subscription@1.1.0
+dsh plugin --profile web add dsh-grok-subscription@1.1.1
 ```
 
 **Install from GitHub:**
@@ -127,6 +127,15 @@ That task makes a real model request and uses the selected service's quota; it i
 ## Updates and sign-out
 
 For npm installs, update in Settings or run `dsh plugin --profile web add dsh-grok-subscription@latest`. For GitHub-source installs, run `dsh plugin --profile web update dsh-grok-subscription`. For local links, pull, test, and rebuild the checkout. Restart DSH afterwards.
+
+In the desktop app the `desktop` profile is owned exclusively by the Electron application, and `dsh plugin --profile desktop …` is refused outright (`profile "desktop" is managed exclusively by the Electron application`), so the desktop app can only be updated by the plugin itself. From 1.1.1 the **Update plugin** button installs the exact version inside that profile directory with DSH's own bundled pnpm. If you are still on an older version and the button reports an error, run the equivalent by hand (pnpm ≥ 11):
+
+```sh
+cd "$HOME/.dsh/profiles/desktop"    # Windows: cd "$env:USERPROFILE\.dsh\profiles\desktop"
+pnpm add --save-exact dsh-grok-subscription@1.1.1
+```
+
+Then quit and restart the desktop app completely. After a successful update the profile's `package.json` dependency should show the target version while its `dsh.profile.bundles` entry is unchanged. Refreshing the browser is not enough: without a Host restart the old version keeps loading.
 
 Uninstall with `dsh plugin --profile web remove dsh-grok-subscription`. This leaves the profile, other plugins, and the CLI's `auth.json` intact.
 
