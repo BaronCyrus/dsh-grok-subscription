@@ -160,6 +160,30 @@ test('usage card derives remaining from used when only used is reported', () => 
   assert.match(html, /style="width:75%"/)
 })
 
+test('an unavailable reading explains a named shape and still shows the window', () => {
+  const html = renderUsage({
+    status: 'unavailable',
+    code: 'unified-billing',
+    reason: 'No credit percentage in this billing response (unified billing: prepaidBalance 0, onDemandCap 0)',
+    periodStart: '2026-09-28T16:46:29.886Z',
+    periodStartLocal: '2026/09/29 00:46:29',
+    periodEnd: '2026-10-05T16:46:29.886Z',
+    periodEndLocal: '2026/10/06 00:46:29',
+  })
+  assert.match(html, /«usageUnifiedBilling»/, 'a named shape gets localized copy, not a raw field name')
+  assert.match(html, /«usageWindow»/)
+  assert.match(html, /2026\/09\/29 00:46:29/)
+  assert.match(html, /2026\/10\/06 00:46:29/)
+  assert.match(html, /unified billing: prepaidBalance 0/, 'the raw diagnostic stays available')
+})
+
+test('an unnamed failure still reports the raw reason', () => {
+  const html = renderUsage({ status: 'unavailable', reason: 'Billing HTTP 503' })
+  assert.match(html, /«usageUnavailable»/)
+  assert.match(html, /Billing HTTP 503/)
+  assert.doesNotMatch(html, /«usageWindow»/, 'no window was reported, so none is invented')
+})
+
 test('usage card survives every partial and hostile payload', () => {
   const shapes = [
     undefined, {}, { status: 'ok' }, { status: 'ok', usedPercent: 6 },

@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.0.1 — 2026-09-29
+
+- Fix **the quota card reporting a raw parser error for an account the upstream API stopped describing with a percentage**. Since the weekly period rolled over on 2026-09-28T16:46Z, `GET /v1/billing?format=credits` answers with a `config` object that carries `isUnifiedBillingUser`, `prepaidBalance`, `onDemandCap`, `onDemandUsed`, `topUpMethod` and the period bounds — and no `creditUsagePercent`, no `productUsage`, and no used/total pair. Every reader in the plugin is unchanged since 1.0.20, so the card simply failed closed with `不可用: Missing creditUsagePercent (keys: config)`, which reads like a broken plugin rather than an upstream shape the plugin does not recognise. Reproduced on a second machine with the same account: same build, same headers, only the clock moved.
+- Name the shape instead of a missing field. The unavailable reading now carries a `code` (`unified-billing` or `missing-percent`) plus the period bounds, the panel renders localized copy for a named code and keeps the raw diagnostic as a hint underneath, and an unnamed failure still shows its own reason.
+- **Show the window even when there is no percentage.** The period start and end come from the same response, so the card now prints `本期窗口: 2026/09/29 00:46:29 → 2026/10/06 00:46:29` whether or not a reading came back. A reset time is never lost to a shape change.
+- Still no invented numbers. A zero prepaid balance and a zero on-demand cap are not a percentage, so the card shows no gauge and the composer badge stays hidden; `parseBillingCredits` is asserted against the captured live body to keep it that way.
+- No adapter, routing, session or RPC-surface changes. `sanitizeUsage` carries the new diagnostic fields through the RPC without exposing anything else.
+
+## 2.0.0 — 2026-09-28
+
 ## 2.0.0 — 2026-09-28
 
 - **Remove the bundled Responses adapter. The `grok-build` route is now always the host's own pi-ai adapter.** The bundled implementation and everything that existed only to support it are gone: its request building, encrypted-reasoning envelope, prompt-cache and usage mapping and image collection (`src/adapter.js` drops from 1081 to 467 lines), the synchronous duck registration, `createGrokBuildAdapterSync` / `createDuckHostAdapter`, the release-then-re-register upgrade 1.2.0 added, and the `DSH_GROK_ADAPTER=fallback` switch. `apply` still returns immediately and builds the adapter from a deferred task, but registers exactly once.

@@ -188,3 +188,54 @@ test('fetchBillingUsage accepts JSON body despite wrong Content-Type when parsea
   assert.equal(result.status, 'ok')
   assert.equal(result.usedPercent, 5)
 })
+
+/**
+ * Live shape observed 2026-09-29 for a signed-in account whose weekly period
+ * rolled over: `config` carries prepaid balance and an on-demand cap, and no
+ * credit percentage at all. Captured verbatim (values included) so a reader
+ * that "helpfully" derives a percent from these fields fails here.
+ */
+const UNIFIED_BILLING_BODY = Object.freeze({
+  config: {
+    currentPeriod: {
+      type: 'USAGE_PERIOD_TYPE_WEEKLY',
+      start: '2026-09-28T16:46:29.886619+00:00',
+      end: '2026-10-05T16:46:29.886619+00:00',
+    },
+    onDemandCap: { val: 0 },
+    onDemandUsed: { val: 0 },
+    isUnifiedBillingUser: true,
+    prepaidBalance: { val: 0 },
+    topUpMethod: 'TOP_UP_METHOD_SAVED_PAYMENT_METHOD',
+    billingPeriodStart: '2026-09-28T16:46:29.886619+00:00',
+    billingPeriodEnd: '2026-10-05T16:46:29.886619+00:00',
+  },
+})
+
+test('unified billing is named, not reported as a missing field', () => {
+  const parsed = parseBillingCredits(UNIFIED_BILLING_BODY)
+
+  assert.equal(parsed.status, 'unavailable')
+  assert.equal(parsed.code, 'unified-billing')
+  assert.match(parsed.reason, /unified billing/i)
+  // A zero prepaid balance and a zero cap are not a percentage.
+  assert.equal(parsed.usedPercent, undefined)
+  assert.equal(parsed.remainingPercent, undefined)
+})
+
+test('an unavailable reading still carries the period window', () => {
+  const parsed = parseBillingCredits(UNIFIED_BILLING_BODY)
+
+  assert.equal(parsed.periodStart, '2026-09-28T16:46:29.886Z')
+  assert.equal(parsed.periodEnd, '2026-10-05T16:46:29.886Z')
+  assert.match(parsed.periodEndLocal, /^2026\/10\/0[56]/)
+})
+
+test('an unknown shape keeps the diagnostic listing of top-level keys', () => {
+  const parsed = parseBillingCredits({ config: { currentPeriod: { end: '2026-09-22T00:00:00.000Z' } } })
+
+  assert.equal(parsed.status, 'unavailable')
+  assert.equal(parsed.code, 'missing-percent')
+  assert.match(parsed.reason, /keys:\s*config/i)
+  assert.equal(parsed.periodEnd, '2026-09-22T00:00:00.000Z', 'the window is still reported')
+})

@@ -51,6 +51,12 @@ function sanitizeUsage(usage) {
   }
   if (out.status !== 'ok') {
     out.reason = typeof usage.reason === 'string' ? usage.reason : 'Usage unavailable'
+    // A named shape and the period window are diagnostics, not readings: they
+    // travel with an unavailable result so the panel can explain it.
+    if (typeof usage.code === 'string') out.code = usage.code
+    for (const field of ['periodStart', 'periodStartLocal', 'periodEnd', 'periodEndLocal']) {
+      if (typeof usage[field] === 'string') out[field] = usage[field]
+    }
     return out
   }
   if (typeof usage.usedPercent === 'number' && Number.isFinite(usage.usedPercent)) out.usedPercent = usage.usedPercent

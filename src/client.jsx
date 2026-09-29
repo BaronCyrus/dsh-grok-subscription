@@ -254,6 +254,8 @@ export function VersionCard({ call, t }) {
   )
 }
 
+const EXPLAINED_USAGE_CODES = new Set(['unified-billing', 'missing-percent'])
+
 function UsagePanel({ usage, t, usageBusy, onRefresh, signedIn }) {
   const ok = usage?.status === 'ok'
   const usedNumber = ok && Number.isFinite(usage.usedPercent) ? usage.usedPercent : undefined
@@ -290,10 +292,25 @@ function UsagePanel({ usage, t, usageBusy, onRefresh, signedIn }) {
           </div>
         </div>
       ) : (
-        <p className="gsEmpty">
-          {t('usageUnavailable')}
-          {usage?.reason ? `: ${usage.reason}` : ''}
-        </p>
+        <div className="gsEmpty">
+          <p>
+            {EXPLAINED_USAGE_CODES.has(usage?.code)
+              ? t(usage.code === 'unified-billing' ? 'usageUnifiedBilling' : 'usageMissingPercent')
+              : `${t('usageUnavailable')}${usage?.reason ? `: ${usage.reason}` : ''}`}
+          </p>
+          {/* The window is upstream data, not a reading: show it even when no
+              percentage came back, so a reset time is never lost. */}
+          {usage?.periodStartLocal || usage?.periodEndLocal ? (
+            <p className="gsHint">
+              {t('usageWindow')}: {usage?.periodStartLocal ?? usage?.periodStart ?? '—'}
+              {' → '}
+              {usage?.periodEndLocal ?? usage?.periodEnd ?? '—'}
+            </p>
+          ) : null}
+          {EXPLAINED_USAGE_CODES.has(usage?.code) && usage?.reason
+            ? <p className="gsHint"><code>{usage.reason}</code></p>
+            : null}
+        </div>
       )}
       {products.length > 0 ? (
         <div className="gsRows">

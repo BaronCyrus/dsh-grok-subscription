@@ -5,10 +5,11 @@ import { readResponseText } from './http-json.js'
 const USAGE_SOURCE = 'billing-credits-undocumented'
 const SHANGHAI_TZ = 'Asia/Shanghai'
 
-function unavailable(reason) {
+function unavailable(reason, extra = {}) {
   return Object.freeze({
     status: 'unavailable',
     reason: typeof reason === 'string' && reason.trim() ? reason.trim() : 'Usage unavailable',
+    ...extra,
     experimental: true,
     source: USAGE_SOURCE,
   })
@@ -71,6 +72,36 @@ function missingPercentReason(body) {
     return 'Missing creditUsagePercent (empty object)'
   }
   return `Missing creditUsagePercent (keys: ${keys.join(',')})`
+}
+
+/**
+ * The unified-billing shape: `config` carries a prepaid balance and an
+ * on-demand cap instead of a credit percentage. It appeared for a signed-in
+ * account with no change on this side, so the reader names the shape instead of
+ * reporting a missing field as if it were broken.
+ */
+function isUnifiedBillingBody(body) {
+  const config = isPlainObject(body.config) ? body.config : undefined
+  return config?.isUnifiedBillingUser === true
+    || isPlainObject(config?.onDemandCap)
+    || isPlainObject(config?.prepaidBalance)
+}
+
+function unifiedBillingReason(body) {
+  const config = isPlainObject(body.config) ? body.config : {}
+  const balance = asFiniteNumber(config.prepaidBalance)
+  const cap = asFiniteNumber(config.onDemandCap)
+  return 'No credit percentage in this billing response'
+    + ` (unified billing: prepaidBalance ${balance ?? 'n/a'}, onDemandCap ${cap ?? 'n/a'})`
+}
+
+/** Period bounds travel with an unavailable reading so the panel can still show the window. */
+function periodFields(body) {
+  const { start, end } = resolvePeriodBounds(body)
+  return {
+    ...(start ? { periodStart: start, periodStartLocal: formatShanghai(start) } : {}),
+    ...(end ? { periodEnd: end, periodEndLocal: formatShanghai(end) } : {}),
+  }
 }
 
 function firstDefined(...values) {
@@ -212,7 +243,14 @@ export function parseBillingCredits(body) {
 
   const usedPercent = resolveUsedPercent(body)
   if (usedPercent === undefined) {
-    return unavailable(missingPercentReason(body))
+    const unified = isUnifiedBillingBody(body)
+    return unavailable(
+      unified ? unifiedBillingReason(body) : missingPercentReason(body),
+      {
+        code: unified ? 'unified-billing' : 'missing-percent',
+        ...periodFields(body),
+      },
+    )
   }
 
   const { start: periodStart, end: periodEnd } = resolvePeriodBounds(body)
