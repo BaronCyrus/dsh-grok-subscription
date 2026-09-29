@@ -24,7 +24,14 @@ test('uses the static fallback, including grok-4.7, when live listing is empty',
   const merged = mergeCatalog([])
   assert.ok(merged.some(model => model.id === 'grok-4.7'))
   assert.equal(merged[0].source, 'fallback')
+  assert.equal(merged[0].contextWindow, 256000)
   assert.ok(fallbackModels().some(model => model.id === 'grok-4.7'))
+})
+
+test('keeps a live context window instead of substituting the fallback', () => {
+  const models = extractLiveModels({ data: [{ id: 'grok-4.7', context_window: 256000 }] })
+  assert.equal(models[0].contextWindow, 256000)
+  assert.equal(models[0].maxTokens, 256000)
 })
 
 test('keeps live models and marks them live when the catalog is non-empty', () => {

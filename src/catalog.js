@@ -3,6 +3,12 @@ import { buildProxyHeaders } from './headers.js'
 import { readResponseJson } from './http-json.js'
 
 const REASONING_LEVELS = Object.freeze(['low', 'medium', 'high', 'xhigh'])
+/**
+ * Only when models-v2 omits a context window. On 2026-09-29 the live catalog
+ * reported 256000 for every Grok Build model; a present `context_window` always
+ * wins, so this is not a cap and does not override 500000 if the proxy sends it.
+ */
+const FALLBACK_CONTEXT_WINDOW = 256_000
 
 function asId(value) {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined
@@ -48,8 +54,8 @@ export function extractLiveModels(body) {
     models.push(Object.freeze({
       id,
       name: displayNameOf(id, object),
-      contextWindow: contextWindowOf(object) ?? 500_000,
-      maxTokens: contextWindowOf(object) ?? 500_000,
+      contextWindow: contextWindowOf(object) ?? FALLBACK_CONTEXT_WINDOW,
+      maxTokens: contextWindowOf(object) ?? FALLBACK_CONTEXT_WINDOW,
       reasoning: object.reasoning !== false,
       reasoningEfforts: reasoningEffortsOf(object),
     }))
@@ -65,8 +71,8 @@ export function fallbackModels() {
   return FALLBACK_MODEL_IDS.map(id => Object.freeze({
     id,
     name: id === 'grok-4.7' ? 'Grok 4.7' : id === 'grok-4.6' ? 'Grok 4.6' : 'Grok 4.5',
-    contextWindow: 500_000,
-    maxTokens: 500_000,
+    contextWindow: FALLBACK_CONTEXT_WINDOW,
+    maxTokens: FALLBACK_CONTEXT_WINDOW,
     reasoning: true,
     reasoningEfforts: id === 'grok-4.5' ? ['low', 'medium', 'high'] : ['low', 'medium', 'high', 'xhigh'],
     defaultEffort: 'high',
@@ -111,8 +117,8 @@ export function toPiModels(models) {
       thinkingLevelMap,
       input: supportsImageInput(model.id) ? ['text', 'image'] : ['text'],
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-      contextWindow: model.contextWindow ?? 500_000,
-      maxTokens: model.maxTokens ?? 500_000,
+      contextWindow: model.contextWindow ?? FALLBACK_CONTEXT_WINDOW,
+      maxTokens: model.maxTokens ?? FALLBACK_CONTEXT_WINDOW,
       compat: { supportsLongCacheRetention: false, supportsDeveloperRole: false },
     }
   })

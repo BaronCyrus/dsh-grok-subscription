@@ -290,6 +290,7 @@ function UsagePanel({ usage, t, usageBusy, onRefresh, signedIn }) {
             {resetLabel ? <span>{t('usageReset')} {resetLabel}</span> : null}
             {usage.periodEnd && usage.periodEndLocal ? <code>{usage.periodEnd}</code> : null}
           </div>
+          {usage.percentSource === 'omitted-zero' ? <p className="gsHint">{t('usageOmittedZero')}</p> : null}
         </div>
       ) : (
         <div className="gsEmpty">

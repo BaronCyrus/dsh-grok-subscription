@@ -8,7 +8,7 @@ For quick setup, see the [README](../README.en.md#install). This guide covers de
 
 You need the DeepSeek Harness desktop app, the official Grok Build CLI, and an account with Grok Build access. The plugin declares Node.js `^22.19.0 || >=24.0.0`; DSH peers use `>=0.1.5-rc.2 <0.3.0-0`, which spans the whole 0.1 and 0.2 lines. See [package.json](../package.json) for the full requirements. Declared compatibility is not a claim that every version has passed live verification.
 
-**Install:** in the desktop app open **Settings → Plugins**, type the package name `dsh-grok-subscription` into the install field, and install it. Then **quit and restart the desktop app completely**; refreshing the page alone does not reload the Host adapter. To pin a version, put the full `package@version` in that field, for example `dsh-grok-subscription@2.0.1`.
+**Install:** in the desktop app open **Settings → Plugins**, type the package name `dsh-grok-subscription` into the install field, and install it. Then **quit and restart the desktop app completely**; refreshing the page alone does not reload the Host adapter. To pin a version, put the full `package@version` in that field, for example `dsh-grok-subscription@2.0.2`.
 
 **The plugin depends on the host's own pi-ai adapter.** From 2.0.0 the `grok-build` route is served entirely by the host's `@deepseek-ai/dsh-llm-pi-ai` / `@earendil-works/pi-ai`, which every DSH installation carries (`@deepseek-ai/dsh` → `dsh-base` → `dsh-llm-pi-ai`, with the `llm-pi-ai` row mounted unconditionally). If those packages cannot be resolved from the DSH installation, the plugin registers no route at all and **Active path** in Settings reads **unavailable**.
 
@@ -16,7 +16,7 @@ If the UI install fails (an unusual profile directory, say), the equivalent runs
 
 ```sh
 cd "$HOME/.dsh/profiles/desktop"    # Windows: cd "$env:USERPROFILE\.dsh\profiles\desktop"
-pnpm add --save-exact --config.minimumReleaseAge=0 dsh-grok-subscription@2.0.1
+pnpm add --save-exact --config.minimumReleaseAge=0 dsh-grok-subscription@2.0.2
 ```
 
 `dsh plugin --profile desktop …` is refused: the Electron application owns that profile exclusively.
@@ -69,7 +69,7 @@ The `grok-build` route is served by the host's official pi-ai adapter, which als
 
 Usage is read through the undocumented `/v1/billing?format=credits` endpoint and is experimental. Settings displays the used and remaining percentages actually returned. Interface changes, network failures, or invalid authentication can make the data unavailable.
 
-The composer badge appears only for `grok-build` with a successful usage read; hover or click for weekly quota and its reset time. Missing data does not mean zero quota. A failed read does not invent percentages or independently block chat.
+The composer badge appears only for `grok-build` with a successful usage read; hover or click for weekly quota and its reset time. A failed read does not invent a percentage or independently block chat. The one exception is protobuf omitting a zero: a complete weekly or monthly `currentPeriod` that contains the current time, with no percentage field anywhere, displays as 0% used and 100% remaining, and the card says that zero was omitted rather than reported. A window that does not contain now, a prepaid balance or on-demand cap alone, or a product row that already has a percentage still produces no number.
 
 For prefix caching, the plugin pins one stable `prompt_cache_key` per DSH session (`grok:<sessionId>`) and writes it into every request; tool ordering stays stable. Auxiliary requests (compaction, session titles) share the session's key rather than taking a separate one; measured against the proxy, isolating them did not improve the chat prefix's cache reads. These are request-construction measures, not a guarantee of backend cache hits or quota savings. No invented hit rate is reported. See [adapter.js](../src/adapter.js).
 
@@ -101,7 +101,7 @@ In the desktop app the `desktop` profile is owned exclusively by the Electron ap
 
 ```sh
 cd "$HOME/.dsh/profiles/desktop"    # Windows: cd "$env:USERPROFILE\.dsh\profiles\desktop"
-pnpm add --save-exact --config.minimumReleaseAge=0 dsh-grok-subscription@2.0.1
+pnpm add --save-exact --config.minimumReleaseAge=0 dsh-grok-subscription@2.0.2
 ```
 
 Then quit and restart the desktop app completely. After a successful update the profile's `package.json` dependency should show the target version while its `dsh.profile.bundles` entry is unchanged. Refreshing the browser is not enough: without a Host restart the old version keeps loading.

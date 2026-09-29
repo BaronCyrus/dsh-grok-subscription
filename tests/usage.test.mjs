@@ -212,23 +212,87 @@ const UNIFIED_BILLING_BODY = Object.freeze({
   },
 })
 
-test('unified billing is named, not reported as a missing field', () => {
-  const parsed = parseBillingCredits(UNIFIED_BILLING_BODY)
+const DURING_UNIFIED_PERIOD = Date.parse('2026-09-29T12:00:00.000Z')
+const BEFORE_UNIFIED_PERIOD = Date.parse('2026-09-28T00:00:00.000Z')
+
+test('an active weekly window with no percentage reads as the omitted proto3 zero', () => {
+  const parsed = parseBillingCredits(UNIFIED_BILLING_BODY, { now: DURING_UNIFIED_PERIOD })
+
+  assert.equal(parsed.status, 'ok')
+  assert.equal(parsed.usedPercent, 0)
+  assert.equal(parsed.remainingPercent, 100)
+  assert.equal(parsed.percentSource, 'omitted-zero')
+  assert.equal(parsed.periodStart, '2026-09-28T16:46:29.886Z')
+  assert.equal(parsed.periodEnd, '2026-10-05T16:46:29.886Z')
+})
+
+test('the same body stays unavailable once the window no longer contains now', () => {
+  const parsed = parseBillingCredits(UNIFIED_BILLING_BODY, { now: BEFORE_UNIFIED_PERIOD })
 
   assert.equal(parsed.status, 'unavailable')
   assert.equal(parsed.code, 'unified-billing')
   assert.match(parsed.reason, /unified billing/i)
-  // A zero prepaid balance and a zero cap are not a percentage.
   assert.equal(parsed.usedPercent, undefined)
   assert.equal(parsed.remainingPercent, undefined)
-})
-
-test('an unavailable reading still carries the period window', () => {
-  const parsed = parseBillingCredits(UNIFIED_BILLING_BODY)
-
+  assert.equal(parsed.percentSource, undefined)
   assert.equal(parsed.periodStart, '2026-09-28T16:46:29.886Z')
   assert.equal(parsed.periodEnd, '2026-10-05T16:46:29.886Z')
-  assert.match(parsed.periodEndLocal, /^2026\/10\/0[56]/)
+})
+
+test('prepaid and on-demand zeros are not a percentage without an active window', () => {
+  const parsed = parseBillingCredits({
+    config: {
+      isUnifiedBillingUser: true,
+      prepaidBalance: { val: 0 },
+      onDemandCap: { val: 0 },
+      billingPeriodStart: '2026-09-28T16:46:29.886619+00:00',
+      billingPeriodEnd: '2026-10-05T16:46:29.886619+00:00',
+    },
+  }, { now: DURING_UNIFIED_PERIOD })
+
+  assert.equal(parsed.status, 'unavailable')
+  assert.equal(parsed.usedPercent, undefined)
+})
+
+test('a product percentage blocks the omitted-zero reading', () => {
+  const parsed = parseBillingCredits({
+    config: {
+      ...UNIFIED_BILLING_BODY.config,
+      productUsage: [{ product: 'GrokBuild', usagePercent: 4 }],
+    },
+  }, { now: DURING_UNIFIED_PERIOD })
+
+  assert.equal(parsed.status, 'unavailable')
+  assert.equal(parsed.usedPercent, undefined)
+})
+
+test('an explicit zero is not marked as an omitted field', () => {
+  const parsed = parseBillingCredits({
+    config: {
+      ...UNIFIED_BILLING_BODY.config,
+      creditUsagePercent: 0,
+    },
+  }, { now: DURING_UNIFIED_PERIOD })
+
+  assert.equal(parsed.status, 'ok')
+  assert.equal(parsed.usedPercent, 0)
+  assert.equal(parsed.remainingPercent, 100)
+  assert.equal(parsed.percentSource, undefined)
+})
+
+test('a daily period does not adopt an omitted percentage', () => {
+  const parsed = parseBillingCredits({
+    config: {
+      currentPeriod: {
+        type: 'USAGE_PERIOD_TYPE_DAILY',
+        start: '2026-09-29T00:00:00.000Z',
+        end: '2026-09-30T00:00:00.000Z',
+      },
+    },
+  }, { now: DURING_UNIFIED_PERIOD })
+
+  assert.equal(parsed.status, 'unavailable')
+  assert.equal(parsed.percentSource, undefined)
 })
 
 test('an unknown shape keeps the diagnostic listing of top-level keys', () => {

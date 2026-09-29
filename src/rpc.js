@@ -66,6 +66,7 @@ function sanitizeUsage(usage) {
   if (typeof usage.periodEnd === 'string') out.periodEnd = usage.periodEnd
   if (typeof usage.periodEndLocal === 'string') out.periodEndLocal = usage.periodEndLocal
   if (typeof usage.fetchedAt === 'string') out.fetchedAt = usage.fetchedAt
+  if (usage.percentSource === 'omitted-zero') out.percentSource = 'omitted-zero'
   if (Array.isArray(usage.productUsage)) {
     out.productUsage = usage.productUsage
       .filter(row => row && typeof row === 'object')

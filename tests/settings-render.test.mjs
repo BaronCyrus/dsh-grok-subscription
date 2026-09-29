@@ -154,6 +154,17 @@ test('usage card renders the gauge and bar for reported percentages', () => {
   assert.match(html, /Grok Build/)
 })
 
+test('an omitted zero renders a full remaining gauge and names the assumption', () => {
+  const html = renderUsage({
+    status: 'ok',
+    usedPercent: 0,
+    remainingPercent: 100,
+    percentSource: 'omitted-zero',
+  })
+  assert.match(html, /class="gsGaugeValue">100%/)
+  assert.match(html, /«usageOmittedZero»/)
+})
+
 test('usage card derives remaining from used when only used is reported', () => {
   const html = renderUsage({ status: 'ok', usedPercent: 25 })
   assert.match(html, /class="gsGaugeValue">75%/)

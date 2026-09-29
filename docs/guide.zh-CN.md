@@ -8,7 +8,7 @@
 
 需要 DeepSeek Harness 桌面版、官方 Grok Build CLI，以及当前具有 Grok Build 使用资格的订阅账号。插件的 Node.js 要求为 `^22.19.0 || >=24.0.0`，DSH peer 声明以 [package.json](../package.json) 为准；其中 DSH 依赖使用 `>=0.1.5-rc.2 <0.3.0-0`，覆盖 0.1 与 0.2 全线。声明范围不等于所有版本都已经过实机验证。
 
-**安装：** 在桌面版打开 **设置 → 插件**，在安装输入框里填入包名 `dsh-grok-subscription` 并安装，然后**完全退出并重启桌面应用**。仅刷新页面不会重新加载 Host 中的适配器。需要可重复安装时，填入完整的 `包名@版本`，例如 `dsh-grok-subscription@2.0.1`。
+**安装：** 在桌面版打开 **设置 → 插件**，在安装输入框里填入包名 `dsh-grok-subscription` 并安装，然后**完全退出并重启桌面应用**。仅刷新页面不会重新加载 Host 中的适配器。需要可重复安装时，填入完整的 `包名@版本`，例如 `dsh-grok-subscription@2.0.2`。
 
 **插件依赖宿主自带的 pi-ai 适配器。** 从 2.0.0 起，`grok-build` 路由完全由宿主的 `@deepseek-ai/dsh-llm-pi-ai` / `@earendil-works/pi-ai` 服务；DSH 的任何安装方式都带有它们（`@deepseek-ai/dsh` → `dsh-base` → `dsh-llm-pi-ai`，且 `llm-pi-ai` 行无条件挂载）。这两个包无法从 DSH 安装目录解析时，插件不会注册任何路由，设置页的「运行通路」显示**不可用**。
 
@@ -16,7 +16,7 @@
 
 ```sh
 cd "$HOME/.dsh/profiles/desktop"    # Windows: cd "$env:USERPROFILE\.dsh\profiles\desktop"
-pnpm add --save-exact --config.minimumReleaseAge=0 dsh-grok-subscription@2.0.1
+pnpm add --save-exact --config.minimumReleaseAge=0 dsh-grok-subscription@2.0.2
 ```
 
 `dsh plugin --profile desktop …` 会被直接拒绝：桌面版 profile 由 Electron 应用独占。
@@ -69,7 +69,7 @@ grok-4.6
 
 用量通过未公开的 `/v1/billing?format=credits` 接口读取，属于实验性能力。设置页展示实际返回的已用和剩余比例；接口变化、网络异常或认证失效都可能使数据不可用。
 
-输入框徽章仅在当前 provider 为 `grok-build` 且用量读取成功时显示，悬停或点击查看每周余量与重置时间。缺失数据不是额度为零；读取失败不会编造百分比，也不会因为单独的额度读取故障阻止聊天。
+输入框徽章仅在当前 provider 为 `grok-build` 且用量读取成功时显示，悬停或点击查看每周余量与重置时间。读取失败不会编造百分比，也不会因为单独的额度读取故障阻止聊天。唯一的例外是 protobuf 把 0 省略掉：响应里有完整的周或月 `currentPeriod`、窗口包住当前时间、并且没有任何百分比字段时，显示已用 0%、剩余 100%，并标明这是零值省略。窗口对不上、只有预付余额或按量上限、或者产品明细里已经有百分比时，仍然不显示数字。
 
 前缀缓存方面，插件为同一 DSH 会话固定同一个 `prompt_cache_key`（`grok:<sessionId>`），并在请求里显式写入，工具顺序保持稳定。压缩、会话标题这类辅助请求与会话共用同一个 key，而不是另开一个——对代理实测下来，隔离它们并不会提高聊天前缀的缓存命中。这些是请求构造措施，不保证服务端缓存命中或节省额度；项目不提供虚构的命中率。实现见 [adapter.js](../src/adapter.js)。
 
@@ -101,7 +101,7 @@ grok-4.6
 
 ```sh
 cd "$HOME/.dsh/profiles/desktop"    # Windows: cd "$env:USERPROFILE\.dsh\profiles\desktop"
-pnpm add --save-exact --config.minimumReleaseAge=0 dsh-grok-subscription@2.0.1
+pnpm add --save-exact --config.minimumReleaseAge=0 dsh-grok-subscription@2.0.2
 ```
 
 然后完全退出并重启桌面版。更新成功后该 profile 的 `package.json` 里依赖应变为目标版本，`dsh.profile.bundles` 条目保持不变。仅刷新网页不够：Host 未重启时仍会加载旧版本。

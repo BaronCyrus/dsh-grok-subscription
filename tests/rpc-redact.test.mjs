@@ -55,8 +55,9 @@ test('usage RPC never returns tokens and sanitizes usage', async () => {
   const handler = createRpcHandler({
     usage: () => ({
       status: 'ok',
-      usedPercent: 10,
-      remainingPercent: 90,
+      usedPercent: 0,
+      remainingPercent: 100,
+      percentSource: 'omitted-zero',
       accessToken: 'LEAK',
       token: 'LEAK',
     }),
@@ -70,7 +71,8 @@ test('usage RPC never returns tokens and sanitizes usage', async () => {
   })
   const cached = await handler('usage', {}, undefined)
   assert.equal(cached.ok, true)
-  assert.equal(cached.value.usage.usedPercent, 10)
+  assert.equal(cached.value.usage.usedPercent, 0)
+  assert.equal(cached.value.usage.percentSource, 'omitted-zero')
   assert.equal(cached.value.usage.accessToken, undefined)
   assert.equal(cached.value.usage.token, undefined)
 

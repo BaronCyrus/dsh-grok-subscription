@@ -1,7 +1,7 @@
 export const zh = {
   nav: 'Grok 订阅',
   title: 'Grok 订阅',
-  subtitle: '用 SuperGrok / X Premium（Grok Build）会话，而不是 XAI_API_KEY。· 2.0.1',
+  subtitle: '用 SuperGrok / X Premium（Grok Build）会话，而不是 XAI_API_KEY。· 2.0.2',
   signedIn: '已登录',
   signedOut: '未登录',
   account: '账户',
@@ -51,6 +51,7 @@ export const zh = {
   usageWindow: '本期窗口',
   usageUnifiedBilling: '上游未返回额度百分比：该账号已是统一计费形态（以预付余额与按量上限计量），因此没有可展示的周额度读数。',
   usageMissingPercent: '上游未返回额度百分比，本期暂无可用读数。',
+  usageOmittedZero: '接口省略了 0 值百分比，因此显示为已用 0%、剩余 100%。这不是另报的数字；窗口对不上当前时间时不会这样显示。',
   usageUnavailable: '不可用',
   usageRefresh: '刷新用量',
   usageOpenGrok: '在 grok.com 查看用量',
@@ -86,7 +87,7 @@ export const zh = {
 export const en = {
   nav: 'Grok Subscription',
   title: 'Grok Subscription',
-  subtitle: 'Use a SuperGrok / X Premium (Grok Build) session, not XAI_API_KEY. · 2.0.1',
+  subtitle: 'Use a SuperGrok / X Premium (Grok Build) session, not XAI_API_KEY. · 2.0.2',
   signedIn: 'Signed in',
   signedOut: 'Signed out',
   account: 'Account',
@@ -136,6 +137,7 @@ export const en = {
   usageWindow: 'Current window',
   usageUnifiedBilling: 'The upstream API returned no credit percentage: this account is on unified billing (measured by prepaid balance and an on-demand cap), so there is no weekly credit reading to show.',
   usageMissingPercent: 'The upstream API returned no credit percentage for this period.',
+  usageOmittedZero: 'The API omitted a zero percentage, so this shows 0% used and 100% remaining. It is not a separately reported number, and it is not shown unless the billing window contains the current time.',
   usageUnavailable: 'Unavailable',
   usageRefresh: 'Refresh usage',
   usageOpenGrok: 'View usage on grok.com',

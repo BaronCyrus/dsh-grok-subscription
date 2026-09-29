@@ -164,6 +164,59 @@ function resolveUsedPercent(body) {
   return undefined
 }
 
+function nowMillis(options) {
+  if (options?.now instanceof Date) {
+    const ms = options.now.getTime()
+    return Number.isFinite(ms) ? ms : Date.now()
+  }
+  if (typeof options?.now === 'number' && Number.isFinite(options.now)) return options.now
+  return Date.now()
+}
+
+function currentPeriodOf(body) {
+  const config = isPlainObject(body.config) ? body.config : undefined
+  if (isPlainObject(config?.currentPeriod)) return config.currentPeriod
+  if (isPlainObject(body.currentPeriod)) return body.currentPeriod
+  return undefined
+}
+
+function productHasPercent(body) {
+  const raw = resolveProductUsage(body)
+  if (!Array.isArray(raw)) return false
+  return raw.some(item => {
+    if (!item || typeof item !== 'object') return false
+    return asFinitePercent(firstDefined(
+      item.creditUsagePercent,
+      item.usedPercent,
+      item.usagePercent,
+      item.percentUsed,
+      item.used_percent,
+    )) !== undefined
+  })
+}
+
+/**
+ * Proto3 JSON omits a zero `creditUsagePercent`. Adopt that zero only when the
+ * response has a weekly or monthly `currentPeriod` whose bounds contain `now`
+ * and no percentage anywhere. A missing field with no such window stays unknown:
+ * prepaid balance and on-demand cap are not a percentage, and a period that does
+ * not contain now cannot prove the omission is still zero.
+ */
+function omittedZeroReading(body, nowMs) {
+  const period = currentPeriodOf(body)
+  if (!period) return undefined
+  const type = typeof period.type === 'string' ? period.type.trim() : ''
+  if (!/weekly$/i.test(type) && !/monthly$/i.test(type)) return undefined
+  const start = asIsoString(period.start)
+  const end = asIsoString(period.end)
+  if (!start || !end) return undefined
+  const startMs = Date.parse(start)
+  const endMs = Date.parse(end)
+  if (!(endMs > startMs) || nowMs < startMs || nowMs >= endMs) return undefined
+  if (productHasPercent(body)) return undefined
+  return { start, end }
+}
+
 function resolvePeriodBounds(body) {
   const config = isPlainObject(body.config) ? body.config : undefined
   const period = firstDefined(
@@ -231,9 +284,10 @@ function sanitizeProductUsage(raw) {
  * Parser for GET /v1/billing?format=credits.
  * Live official shape nests fields under `config` (creditUsagePercent,
  * currentPeriod, productUsage). Top-level fields are also accepted.
- * Never invents percentages when no usable percent can be resolved.
+ * A zero percentage omitted by proto3 JSON is adopted only for an active weekly
+ * or monthly window (see omittedZeroReading). Anything else stays unavailable.
  */
-export function parseBillingCredits(body) {
+export function parseBillingCredits(body, options = {}) {
   if (body === null || body === undefined) {
     return unavailable('Empty billing response')
   }
@@ -241,7 +295,9 @@ export function parseBillingCredits(body) {
     return unavailable('Unexpected billing response shape')
   }
 
-  const usedPercent = resolveUsedPercent(body)
+  const explicitPercent = resolveUsedPercent(body)
+  const omittedZero = explicitPercent === undefined ? omittedZeroReading(body, nowMillis(options)) : undefined
+  const usedPercent = explicitPercent ?? (omittedZero ? 0 : undefined)
   if (usedPercent === undefined) {
     const unified = isUnifiedBillingBody(body)
     return unavailable(
@@ -263,13 +319,14 @@ export function parseBillingCredits(body) {
     source: USAGE_SOURCE,
     usedPercent,
     remainingPercent,
+    ...(omittedZero ? { percentSource: 'omitted-zero' } : {}),
     ...(periodStart ? { periodStart, periodStartLocal: formatShanghai(periodStart) } : {}),
     ...(periodEnd ? { periodEnd, periodEndLocal: formatShanghai(periodEnd) } : {}),
     ...(productUsage ? { productUsage } : {}),
   })
 }
 
-export function parseBillingCreditsJson(text) {
+export function parseBillingCreditsJson(text, options = {}) {
   if (typeof text !== 'string') return unavailable('Non-text billing response')
   if (!text.trim()) return unavailable('Empty billing response')
   let body
@@ -278,7 +335,7 @@ export function parseBillingCreditsJson(text) {
   } catch {
     return unavailable('Invalid JSON from billing API')
   }
-  return parseBillingCredits(body)
+  return parseBillingCredits(body, options)
 }
 
 async function fetchBillingUsageOnce(accessToken, options = {}) {
