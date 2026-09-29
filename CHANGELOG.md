@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.0.3 — 2026-09-29
+
+- Use the **documented context window**, not the 256k value `models-v2` currently returns. The public model table lists `grok-4.7`, `grok-4.6` and `grok-4.5` at 500k, and `grok-4.7` Fast as the same model; only `grok-build-0.1` is 256k. The subscription catalog reports `context_window: 256000` for all four Build models anyway. A model id in that table now keeps the documented window (`grok-4.7-build-fast` included) even when the catalog says otherwise. An id that is not in the table still uses the catalog value, and the static fallback when a window is missing is 500k again.
+
 ## 2.0.2 — 2026-09-29
 
 - Read an omitted weekly percentage as **0% used / 100% remaining**, instead of telling a fresh billing period that the account has no quota number. Right after the 2026-09-28 rollover, `GET /v1/billing?format=credits` returned the unified-billing `config` (`isUnifiedBillingUser`, zero prepaid balance, zero on-demand cap, and a weekly `currentPeriod`) with no `creditUsagePercent`. That omission is proto3 dropping a zero scalar, not a new meter: the same account's `GetGrokCreditsConfig` response on grok.com (HTTP 200, `grpc-status: 0`) carried the same window and also omitted the usage-ratio field. Once usage was non-zero the field came back on the wire, and an explicit number still wins. The zero is adopted only when the period type is weekly or monthly, both bounds parse, the window contains the current time, and no percentage exists on the body or on a product row. Prepaid balance and on-demand cap are still not a percentage. Outside that window the card stays unavailable. An explicit `0` is shown the same way but is not marked as omitted.

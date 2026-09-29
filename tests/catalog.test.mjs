@@ -24,14 +24,28 @@ test('uses the static fallback, including grok-4.7, when live listing is empty',
   const merged = mergeCatalog([])
   assert.ok(merged.some(model => model.id === 'grok-4.7'))
   assert.equal(merged[0].source, 'fallback')
-  assert.equal(merged[0].contextWindow, 256000)
+  assert.equal(merged[0].contextWindow, 500000)
   assert.ok(fallbackModels().some(model => model.id === 'grok-4.7'))
 })
 
-test('keeps a live context window instead of substituting the fallback', () => {
-  const models = extractLiveModels({ data: [{ id: 'grok-4.7', context_window: 256000 }] })
-  assert.equal(models[0].contextWindow, 256000)
-  assert.equal(models[0].maxTokens, 256000)
+test('documented models keep the docs window when models-v2 reports 256k', () => {
+  const models = extractLiveModels({
+    data: [
+      { id: 'grok-4.7', context_window: 256000 },
+      { id: 'grok-4.7-build-fast', context_window: 256000 },
+      { id: 'grok-4.6', context_window: 256000 },
+      { id: 'grok-4.5', context_window: 256000 },
+      { id: 'grok-build-0.1', context_window: 500000 },
+      { id: 'custom-model', context_window: 123456 },
+    ],
+  })
+  assert.equal(models.find(model => model.id === 'grok-4.7').contextWindow, 500000)
+  assert.equal(models.find(model => model.id === 'grok-4.7').maxTokens, 500000)
+  assert.equal(models.find(model => model.id === 'grok-4.7-build-fast').contextWindow, 500000)
+  assert.equal(models.find(model => model.id === 'grok-4.6').contextWindow, 500000)
+  assert.equal(models.find(model => model.id === 'grok-4.5').contextWindow, 500000)
+  assert.equal(models.find(model => model.id === 'grok-build-0.1').contextWindow, 256000)
+  assert.equal(models.find(model => model.id === 'custom-model').contextWindow, 123456)
 })
 
 test('keeps live models and marks them live when the catalog is non-empty', () => {

@@ -4,11 +4,31 @@ import { readResponseJson } from './http-json.js'
 
 const REASONING_LEVELS = Object.freeze(['low', 'medium', 'high', 'xhigh'])
 /**
- * Only when models-v2 omits a context window. On 2026-09-29 the live catalog
- * reported 256000 for every Grok Build model; a present `context_window` always
- * wins, so this is not a cap and does not override 500000 if the proxy sends it.
+ * Context windows from the public model table (docs.x.ai/developers/models).
+ * The Grok Build `models-v2` catalog currently reports 256000 for grok-4.7,
+ * grok-4.6 and grok-4.5; that number is the documented window of grok-build-0.1,
+ * not of these models. A listed id uses the documented window. grok-4.7 Fast is
+ * the same model on faster infrastructure, so it keeps 500k.
  */
-const FALLBACK_CONTEXT_WINDOW = 256_000
+const DOCUMENTED_CONTEXT_WINDOWS = Object.freeze({
+  'grok-4.7': 500_000,
+  'grok-4.7-build-fast': 500_000,
+  'grok-4.6': 500_000,
+  'grok-4.5': 500_000,
+  'grok-4.3': 1_000_000,
+  'grok-4.20-0309-reasoning': 1_000_000,
+  'grok-4.20-0309-non-reasoning': 1_000_000,
+  'grok-4.20-multi-agent-0309': 1_000_000,
+  'grok-build-0.1': 256_000,
+})
+/** Used only when the id is not in the table and the catalog omits a window. */
+const FALLBACK_CONTEXT_WINDOW = 500_000
+
+function documentedContextWindow(id) {
+  return Object.prototype.hasOwnProperty.call(DOCUMENTED_CONTEXT_WINDOWS, id)
+    ? DOCUMENTED_CONTEXT_WINDOWS[id]
+    : undefined
+}
 
 function asId(value) {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined
@@ -51,11 +71,12 @@ export function extractLiveModels(body) {
     if (!id || seen.has(id)) continue
     seen.add(id)
     const object = row && typeof row === 'object' ? row : { id }
+    const contextWindow = documentedContextWindow(id) ?? contextWindowOf(object) ?? FALLBACK_CONTEXT_WINDOW
     models.push(Object.freeze({
       id,
       name: displayNameOf(id, object),
-      contextWindow: contextWindowOf(object) ?? FALLBACK_CONTEXT_WINDOW,
-      maxTokens: contextWindowOf(object) ?? FALLBACK_CONTEXT_WINDOW,
+      contextWindow,
+      maxTokens: contextWindow,
       reasoning: object.reasoning !== false,
       reasoningEfforts: reasoningEffortsOf(object),
     }))
@@ -71,8 +92,8 @@ export function fallbackModels() {
   return FALLBACK_MODEL_IDS.map(id => Object.freeze({
     id,
     name: id === 'grok-4.7' ? 'Grok 4.7' : id === 'grok-4.6' ? 'Grok 4.6' : 'Grok 4.5',
-    contextWindow: FALLBACK_CONTEXT_WINDOW,
-    maxTokens: FALLBACK_CONTEXT_WINDOW,
+    contextWindow: documentedContextWindow(id) ?? FALLBACK_CONTEXT_WINDOW,
+    maxTokens: documentedContextWindow(id) ?? FALLBACK_CONTEXT_WINDOW,
     reasoning: true,
     reasoningEfforts: id === 'grok-4.5' ? ['low', 'medium', 'high'] : ['low', 'medium', 'high', 'xhigh'],
     defaultEffort: 'high',

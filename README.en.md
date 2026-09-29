@@ -61,13 +61,13 @@ Pick a Grok model your account can use, adjust reasoning effort as needed, and s
 <details>
 <summary>Check the version / pin one / fall back when the UI install fails</summary>
 
-**Settings → Plugins** lists the installed plugins and their versions, and the plugin's own **Settings → Grok Subscription** page shows a version card. To pin a version, put the full `package@version` in the install field, for example `dsh-grok-subscription@2.0.2`.
+**Settings → Plugins** lists the installed plugins and their versions, and the plugin's own **Settings → Grok Subscription** page shows a version card. To pin a version, put the full `package@version` in the install field, for example `dsh-grok-subscription@2.0.3`.
 
 If the UI install fails (an unusual profile directory, say), the equivalent runs against the desktop profile itself (pnpm ≥ 11):
 
 ```sh
 cd "$HOME/.dsh/profiles/desktop"    # Windows: cd "$env:USERPROFILE\.dsh\profiles\desktop"
-pnpm add --save-exact --config.minimumReleaseAge=0 dsh-grok-subscription@2.0.2
+pnpm add --save-exact --config.minimumReleaseAge=0 dsh-grok-subscription@2.0.3
 ```
 
 `dsh plugin --profile desktop …` is refused: the Electron application owns that profile exclusively. CLI paths, sign-in, and troubleshooting are in the [full user guide](docs/guide.en.md).
