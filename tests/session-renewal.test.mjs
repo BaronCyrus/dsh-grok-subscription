@@ -1,8 +1,11 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { EventEmitter } from 'node:events'
-import { createSessionService, spawnGrokRefresh } from '../src/session.js'
-import { TOKEN_EXPIRY_SKEW_MS } from '../src/constants.js'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { readGrokAuthSession, writeOauthSession } from '../src/auth-file.js'
+import { createSessionService } from '../src/session.js'
+import { GROK_OIDC_CLIENT_ID, TOKEN_EXPIRY_SKEW_MS, XAI_OAUTH_ISSUER } from '../src/constants.js'
 
 const NOW = Date.parse('2026-09-22T08:00:00Z')
 const iso = ms => new Date(ms).toISOString()
@@ -15,15 +18,6 @@ const grokSession = (token, expiresAtMs) => ({
   maskedAccount: 'u***@example.com',
 })
 
-const afterSpawn = () => new Promise(resolve => setImmediate(resolve))
-
-function fakeChild() {
-  const child = new EventEmitter()
-  child.killed = false
-  child.kill = () => { child.killed = true }
-  return child
-}
-
 function sessionService({ session, renewSession, now = () => NOW }) {
   return createSessionService({
     readAuth: () => ({ session, reason: undefined }),
@@ -34,67 +28,9 @@ function sessionService({ session, renewSession, now = () => NOW }) {
   })
 }
 
-// ---------------------------------------------------------------- CLI spawn
-
-test('spawnGrokRefresh runs `grok models` and resolves on exit', async () => {
-  const child = fakeChild()
-  const calls = []
-  const pending = spawnGrokRefresh({
-    spawn: (bin, args, options) => { calls.push({ bin, args, options }); return child },
-    env: { DSH_GROK_BIN: '/opt/grok' },
-    exists: () => true,
-  })
-  await afterSpawn()
-  child.emit('exit', 0)
-  const result = await pending
-  assert.equal(calls.length, 1)
-  assert.equal(calls[0].bin, '/opt/grok')
-  assert.deepEqual(calls[0].args, ['models'])
-  assert.equal(result.ok, true)
-  assert.equal(result.code, 0)
-})
-
-test('spawnGrokRefresh treats a non-zero exit as done, not as failure', async () => {
-  // The CLI exits 0 even when it says "You are not authenticated", and can exit
-  // non-zero after a successful refresh, so only the re-read can judge.
-  const child = fakeChild()
-  const pending = spawnGrokRefresh({
-    spawn: () => child,
-    env: { DSH_GROK_BIN: '/opt/grok' },
-    exists: () => true,
-  })
-  await afterSpawn()
-  child.emit('exit', 1)
-  assert.deepEqual(await pending, { ok: true, code: 1 })
-})
-
-test('spawnGrokRefresh kills a hanging CLI', async () => {
-  const child = fakeChild()
-  const result = await spawnGrokRefresh({
-    spawn: () => child,
-    env: { DSH_GROK_BIN: '/opt/grok' },
-    exists: () => true,
-    timeoutMs: 10,
-  })
-  assert.deepEqual(result, { ok: false, reason: 'timeout' })
-  assert.equal(child.killed, true)
-})
-
-test('spawnGrokRefresh surfaces a spawn error', async () => {
-  const child = fakeChild()
-  const pending = spawnGrokRefresh({
-    spawn: () => child,
-    env: { DSH_GROK_BIN: '/opt/grok' },
-    exists: () => true,
-  })
-  await afterSpawn()
-  child.emit('error', new Error('ENOENT'))
-  await assert.rejects(pending, /Could not run grok CLI/)
-})
-
 // ------------------------------------------------------------ token renewal
 
-test('an expired in-memory token is renewed through the CLI', async () => {
+test('an expired in-memory token is renewed through the refresh grant', async () => {
   let renewals = 0
   const service = sessionService({
     session: grokSession('stale', NOW - 1000),
@@ -119,7 +55,7 @@ test('renewal starts before the token actually expires', async () => {
   assert.equal(renewals, 1)
 })
 
-test('a valid token never spawns the CLI', async () => {
+test('a valid token is not refreshed again', async () => {
   let renewals = 0
   const service = sessionService({
     session: grokSession('good', NOW + 3600_000),
@@ -130,7 +66,7 @@ test('a valid token never spawns the CLI', async () => {
   assert.equal(renewals, 0)
 })
 
-test('an unknown expiry is treated as usable rather than spawning the CLI', async () => {
+test('an unknown expiry is treated as usable rather than refreshed', async () => {
   let renewals = 0
   const service = sessionService({
     session: grokSession('no-expiry', undefined),
@@ -184,4 +120,51 @@ test('refreshToken forces renewal even for a token that is still valid', async (
   await service.status()
   assert.equal(await service.refreshToken(), 'fresh')
   assert.equal(renewals, 1)
+})
+
+test('default renewal posts a refresh grant and rewrites auth.json', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'grok-refresh-'))
+  const path = join(dir, 'auth.json')
+  const endpoints = {
+    deviceAuthorizationEndpoint: 'https://auth.x.ai/oauth2/device/code',
+    tokenEndpoint: 'https://auth.x.ai/oauth2/token',
+  }
+  writeOauthSession(path, {
+    issuer: XAI_OAUTH_ISSUER,
+    clientId: GROK_OIDC_CLIENT_ID,
+    accessToken: 'stale',
+    refreshToken: 'refresh-old',
+    expiresAt: iso(NOW - 1000),
+    email: 'user@example.com',
+  })
+  let body = ''
+  const fetchImpl = async (_url, init) => {
+    body = init.body
+    return {
+      status: 200,
+      headers: { get: () => null },
+      text: async () => JSON.stringify({ access_token: 'fresh', refresh_token: 'refresh-new', expires_in: 3600 }),
+    }
+  }
+  try {
+    const service = createSessionService({
+      authPath: path,
+      readAuth: () => readGrokAuthSession(path),
+      fetch: fetchImpl,
+      oauthEndpoints: endpoints,
+      now: () => NOW,
+      loadCatalog: async () => ({ models: [], source: 'live' }),
+      fetchBillingUsage: async () => ({ status: 'unavailable', reason: 'test' }),
+    })
+    await service.status()
+    assert.equal(await service.currentToken(), 'fresh')
+    assert.match(body, /grant_type=refresh_token/)
+    assert.match(body, /refresh_token=refresh-old/)
+    const stored = readGrokAuthSession(path)
+    assert.equal(stored.session.accessToken, 'fresh')
+    assert.equal(stored.session.refreshToken, 'refresh-new')
+    assert.equal(JSON.stringify(await service.status()).includes('refresh-new'), false)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
 })

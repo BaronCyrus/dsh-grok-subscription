@@ -8,7 +8,7 @@
 
 **Code, ask about images, and adjust reasoning in DSH with your Grok Build subscription.**
 
-Reuse the official Grok Build CLI session to select models, attach images, and check weekly quota inside DeepSeek Harness.
+Use a SuperGrok / X Premium Grok Build session to select models, attach images, and check weekly quota inside DeepSeek Harness.
 No separate pay-as-you-go xAI API key is required.
 
 [![CI](https://github.com/BaronCyrus/dsh-grok-subscription/actions/workflows/ci.yml/badge.svg)](https://github.com/BaronCyrus/dsh-grok-subscription/actions/workflows/ci.yml)
@@ -27,12 +27,12 @@ No separate pay-as-you-go xAI API key is required.
 
 | Capability | What it does |
 | --- | --- |
-| **Reuse subscription sign-in** | Start CLI / device-code login in Settings, or pull an existing Grok CLI session without manually pasting tokens |
+| **Subscription sign-in** | Start a device-code login in Settings, or read an existing `auth.json`, without installing the grok command or pasting tokens |
 | **Model catalog sync** | Prefers the account's live catalog after sign-in, with a built-in fallback when that read fails; no models appear while signed out |
 | **Reasoning effort** | Select the levels offered by each model, typically `low` / `medium` / `high` / `xhigh`, with `high` preferred by default |
 | **Image input** | Paste or attach images for supported models; Settings shows the active adapter path and attachment capability |
 | **Weekly quota** | The composer badge and Settings show reported usage; the experimental quota reader never invents missing numbers |
-| **Session renewal and updates** | Attempts renewal through the official CLI near token expiry or after an authentication rejection; Settings also checks plugin versions |
+| **Session renewal and updates** | Renews with the refresh token near expiry or after an authentication rejection; Settings also checks plugin versions |
 | **No tokens in browser responses** | Access tokens are used Host-side; a subscription failure never silently selects another paid model route |
 
 <a id="three-step-start"></a>
@@ -40,9 +40,9 @@ No separate pay-as-you-go xAI API key is required.
 
 ## Install
 
-You need **DeepSeek Harness**, the **official Grok Build CLI on the same machine**, and a SuperGrok / X Premium account that **currently has Grok Build access**. The subscription name alone does not guarantee that access; the account's actual authorization determines it.
+You need **DeepSeek Harness** and a SuperGrok / X Premium account that **currently has Grok Build access**. The grok command is not required. The subscription name alone does not guarantee that access; the account's actual authorization determines it.
 
-For DSH setup, see the [official instructions](https://github.com/deepseek-ai/deepseek-harness#run). Version requirements and CLI paths are covered in [Installation and compatibility](docs/guide.en.md#installation-and-compatibility).
+For DSH setup, see the [official instructions](https://github.com/deepseek-ai/deepseek-harness#run). Version requirements are covered in [Installation and compatibility](docs/guide.en.md#installation-and-compatibility).
 
 ### 1. Install the plugin
 
@@ -50,9 +50,9 @@ In the desktop app open **Settings → Plugins**, type the package name `dsh-gro
 
 ### 2. Sign in
 
-Open **Settings → Grok Subscription** and select **CLI login** or **Device-code login**. Follow the browser and panel instructions. If you already ran `grok login`, select **Pull from Grok CLI**.
+Open **Settings → Grok Subscription** and select **Sign in**. The panel shows a link and a one-time code; after you authorize, the session is written to `~/.grok/auth.json`. If this machine already has a session file, select **Read saved session**.
 
-> This plugin relies on the official Grok Build CLI for sign-in and renewal; it is not CLI-independent. Do not paste `XAI_API_KEY`, and never share `auth.json` or tokens in chats, screenshots, or public issues.
+> Sign-in and renewal run inside the plugin. It does not invoke the grok command. Do not paste `XAI_API_KEY`, and never share `auth.json` or tokens in chats, screenshots, or public issues.
 
 ### 3. Select a model
 
@@ -61,16 +61,16 @@ Pick a Grok model your account can use, adjust reasoning effort as needed, and s
 <details>
 <summary>Check the version / pin one / fall back when the UI install fails</summary>
 
-**Settings → Plugins** lists the installed plugins and their versions, and the plugin's own **Settings → Grok Subscription** page shows a version card. To pin a version, put the full `package@version` in the install field, for example `dsh-grok-subscription@2.0.3`.
+**Settings → Plugins** lists the installed plugins and their versions, and the plugin's own **Settings → Grok Subscription** page shows a version card. To pin a version, put the full `package@version` in the install field, for example `dsh-grok-subscription@2.0.4`.
 
 If the UI install fails (an unusual profile directory, say), the equivalent runs against the desktop profile itself (pnpm ≥ 11):
 
 ```sh
 cd "$HOME/.dsh/profiles/desktop"    # Windows: cd "$env:USERPROFILE\.dsh\profiles\desktop"
-pnpm add --save-exact --config.minimumReleaseAge=0 dsh-grok-subscription@2.0.3
+pnpm add --save-exact --config.minimumReleaseAge=0 dsh-grok-subscription@2.0.4
 ```
 
-`dsh plugin --profile desktop …` is refused: the Electron application owns that profile exclusively. CLI paths, sign-in, and troubleshooting are in the [full user guide](docs/guide.en.md).
+`dsh plugin --profile desktop …` is refused: the Electron application owns that profile exclusively. Sign-in and troubleshooting are in the [full user guide](docs/guide.en.md).
 
 </details>
 
@@ -111,7 +111,7 @@ Identity and time values in the account screenshot are demo data. Usage screensh
 
 ## User guide
 
-The [full user guide](docs/guide.en.md) covers installation and compatibility, CLI sign-in, the model catalog, images, quota limitations, network troubleshooting, and development.
+The [full user guide](docs/guide.en.md) covers installation and compatibility, device-code sign-in, the model catalog, images, quota limitations, network troubleshooting, and development.
 
 Quick links: [Sign-in and credentials](docs/guide.en.md#sign-in-and-credentials) · [Image input](docs/guide.en.md#image-input) · [Troubleshooting](docs/guide.en.md#troubleshooting) · [Contributing](CONTRIBUTING.md).
 
@@ -121,15 +121,15 @@ Quick links: [Sign-in and credentials](docs/guide.en.md#sign-in-and-credentials)
 
 The desktop app owns its `desktop` profile exclusively, so `dsh plugin --profile desktop …` is refused there. The desktop **Update plugin** button therefore installs the exact version inside that profile directory with DSH's own bundled pnpm; before `1.1.1` that button always failed in the desktop app. Manual steps: [Updates and sign-out](docs/guide.en.md#updates-and-sign-out).
 
-**Uninstall:** remove `dsh-grok-subscription` in **Settings → Plugins**, or run `pnpm remove dsh-grok-subscription` in that profile directory, then restart the desktop app. Uninstalling leaves other plugins, the profile, and the CLI's `auth.json` intact, and is not the same as signing out of the official CLI; see [Updates and sign-out](docs/guide.en.md#updates-and-sign-out).
+**Uninstall:** remove `dsh-grok-subscription` in **Settings → Plugins**, or run `pnpm remove dsh-grok-subscription` in that profile directory, then restart the desktop app. Uninstalling leaves other plugins, the profile, and `~/.grok/auth.json` intact, and does not revoke the xAI authorization; see [Updates and sign-out](docs/guide.en.md#updates-and-sign-out).
 
-Restart DSH afterwards. Removal does not delete other plugins, the whole profile, or the CLI's `auth.json`; it is not the same as signing out of the official CLI. See [Updates and sign-out](docs/guide.en.md#updates-and-sign-out).
+Restart DSH afterwards. Removal does not delete other plugins, the whole profile, or `~/.grok/auth.json`, and it does not revoke the xAI authorization. See [Updates and sign-out](docs/guide.en.md#updates-and-sign-out).
 
 <a id="troubleshooting"></a>
 
 ## FAQ
 
-**Empty model list?** Confirm that the official CLI has a subscription session, then select **Pull from Grok CLI** in Settings. An API-key-only CLI configuration is not a subscription login.
+**Empty model list?** Sign in from Settings, or select **Read saved session**. An API-key-only entry is not a subscription login.
 
 **Sign-in or requests time out?** Check connectivity from the DSH host to account and subscription services, including its launch-time proxy settings. Network issues, authentication, or service errors can cause failures; do not assume the quota is exhausted. See [Troubleshooting](docs/guide.en.md#troubleshooting).
 

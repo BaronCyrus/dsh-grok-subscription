@@ -1,6 +1,18 @@
-import { lstatSync, openSync, readFileSync, closeSync, constants as fsConstants } from 'node:fs'
+import { randomBytes } from 'node:crypto'
+import {
+  chmodSync,
+  closeSync,
+  constants as fsConstants,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeSync,
+} from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import {
   API_KEY_AUTH_MODES,
   API_KEY_SCOPE,
@@ -137,6 +149,9 @@ function sessionFromEntry(scope, entry) {
   return Object.freeze({
     scope,
     accessToken: token,
+    refreshToken: asNonEmptyString(object.refresh_token ?? object.refreshToken),
+    oidcIssuer: asNonEmptyString(object.oidc_issuer ?? object.oidcIssuer),
+    oidcClientId: asNonEmptyString(object.oidc_client_id ?? object.oidcClientId),
     authMode,
     email,
     userId,
@@ -195,6 +210,94 @@ export function parseAuthDocument(document) {
 export function readGrokAuthSession(path = authJsonPath(), options = {}) {
   const document = readSecureJsonFile(path, options)
   return parseAuthDocument(document)
+}
+
+function fileMeta(stat) {
+  return {
+    isSymbolicLink: typeof stat.isSymbolicLink === 'function' ? stat.isSymbolicLink() : Boolean(stat.isSymbolicLink),
+    isFile: typeof stat.isFile === 'function' ? stat.isFile() : Boolean(stat.isFile),
+    mode: stat.mode,
+    uid: stat.uid,
+    size: stat.size,
+  }
+}
+
+/**
+ * Replace one OAuth entry in auth.json and leave every other key untouched.
+ * The refresh token stays in this file; callers must not copy it into DSH.
+ * A symlink is refused. The replacement is mode 0600 even if the previous
+ * file was looser, so a readable leftover can be tightened by signing in again.
+ */
+export function writeOauthSession(path, fields, options = {}) {
+  if (!asNonEmptyString(fields?.accessToken) || !asNonEmptyString(fields?.issuer) || !asNonEmptyString(fields?.clientId)) {
+    throw new Error('Refusing to store an OAuth session without an access token')
+  }
+  const lstat = options.lstat ?? (target => lstatSync(target, { throwIfNoEntry: false }))
+  const existing = lstat(path)
+  let document = {}
+  if (existing) {
+    const meta = fileMeta(existing)
+    if (meta.isSymbolicLink) throw new Error('Refusing to write a symbolic-link Grok auth.json')
+    if (!meta.isFile) throw new Error('Grok auth.json is not a regular file')
+    const platform = options.platform ?? process.platform
+    const currentUid = options.uid ?? process.getuid?.()
+    if (platform !== 'win32' && typeof currentUid === 'number' && typeof meta.uid === 'number' && meta.uid !== currentUid) {
+      throw new Error('Grok auth.json is not owned by the current user')
+    }
+    if (typeof meta.size === 'number' && meta.size > AUTH_FILE_MAX_BYTES) {
+      throw new Error('Grok auth.json is larger than the allowed size')
+    }
+    document = readSecureJsonFile(path, options)
+    if (!document || typeof document !== 'object' || Array.isArray(document)) {
+      throw new Error('Grok auth document is not an object')
+    }
+  }
+  const scope = `${fields.issuer}::${fields.clientId}`
+  const previous = document[scope] && typeof document[scope] === 'object' && !Array.isArray(document[scope])
+    ? document[scope]
+    : {}
+  const next = { ...previous, key: fields.accessToken, auth_mode: 'oidc', oidc_issuer: fields.issuer, oidc_client_id: fields.clientId }
+  if (asNonEmptyString(fields.expiresAt)) next.expires_at = fields.expiresAt
+  if (asNonEmptyString(fields.refreshToken)) next.refresh_token = fields.refreshToken
+  if (asNonEmptyString(fields.email)) next.email = fields.email
+  if (asNonEmptyString(fields.userId)) next.user_id = fields.userId
+  document[scope] = next
+  writeSecureJsonFile(path, document, options)
+  return parseAuthDocument(document)
+}
+
+function writeSecureJsonFile(path, document, options = {}) {
+  const mkdir = options.mkdir ?? ((dir => mkdirSync(dir, { recursive: true, mode: 0o700 })))
+  const open = options.open ?? ((target => openSync(target, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL, 0o600)))
+  const write = options.write ?? ((fd, payload) => writeSync(fd, payload))
+  const close = options.close ?? closeSync
+  const rename = options.rename ?? renameSync
+  const unlink = options.unlink ?? unlinkSync
+  const chmod = options.chmod ?? chmodSync
+  mkdir(dirname(path))
+  const tmp = `${path}.${randomBytes(6).toString('hex')}.tmp`
+  const payload = `${JSON.stringify(document, null, 2)}\n`
+  const fd = open(tmp)
+  try {
+    write(fd, payload)
+  } catch (error) {
+    try { close(fd) } catch { /* the original error is the one to report */ }
+    try { unlink(tmp) } catch { /* best effort */ }
+    throw error
+  }
+  close(fd)
+  try {
+    rename(tmp, path)
+  } catch (error) {
+    try { unlink(tmp) } catch { /* best effort */ }
+    throw error
+  }
+  try {
+    chmod(path, 0o600)
+  } catch {
+    // Windows ACLs do not honor POSIX modes. The exclusive create used 0600
+    // where the platform supports it.
+  }
 }
 
 export function publicSessionView(session) {

@@ -6,9 +6,9 @@ For quick setup, see the [README](../README.en.md#install). This guide covers de
 
 ## Installation and compatibility
 
-You need the DeepSeek Harness desktop app, the official Grok Build CLI, and an account with Grok Build access. The plugin declares Node.js `^22.19.0 || >=24.0.0`; DSH peers use `>=0.1.5-rc.2 <0.3.0-0`, which spans the whole 0.1 and 0.2 lines. See [package.json](../package.json) for the full requirements. Declared compatibility is not a claim that every version has passed live verification.
+You need the DeepSeek Harness desktop app and an account with Grok Build access. The grok command is not required. The plugin declares Node.js `^22.19.0 || >=24.0.0`; DSH peers use `>=0.1.5-rc.2 <0.3.0-0`, which spans the whole 0.1 and 0.2 lines. See [package.json](../package.json) for the full requirements. Declared compatibility is not a claim that every version has passed live verification.
 
-**Install:** in the desktop app open **Settings → Plugins**, type the package name `dsh-grok-subscription` into the install field, and install it. Then **quit and restart the desktop app completely**; refreshing the page alone does not reload the Host adapter. To pin a version, put the full `package@version` in that field, for example `dsh-grok-subscription@2.0.3`.
+**Install:** in the desktop app open **Settings → Plugins**, type the package name `dsh-grok-subscription` into the install field, and install it. Then **quit and restart the desktop app completely**; refreshing the page alone does not reload the Host adapter. To pin a version, put the full `package@version` in that field, for example `dsh-grok-subscription@2.0.4`.
 
 **The plugin depends on the host's own pi-ai adapter.** From 2.0.0 the `grok-build` route is served entirely by the host's `@deepseek-ai/dsh-llm-pi-ai` / `@earendil-works/pi-ai`, which every DSH installation carries (`@deepseek-ai/dsh` → `dsh-base` → `dsh-llm-pi-ai`, with the `llm-pi-ai` row mounted unconditionally). If those packages cannot be resolved from the DSH installation, the plugin registers no route at all and **Active path** in Settings reads **unavailable**.
 
@@ -16,30 +16,22 @@ If the UI install fails (an unusual profile directory, say), the equivalent runs
 
 ```sh
 cd "$HOME/.dsh/profiles/desktop"    # Windows: cd "$env:USERPROFILE\.dsh\profiles\desktop"
-pnpm add --save-exact --config.minimumReleaseAge=0 dsh-grok-subscription@2.0.3
+pnpm add --save-exact --config.minimumReleaseAge=0 dsh-grok-subscription@2.0.4
 ```
 
 `dsh plugin --profile desktop …` is refused: the Electron application owns that profile exclusively.
 
 ## Sign-in and credentials
 
-**The official Grok Build CLI must be available on the DSH Host**, not just on the phone or another computer viewing the Web UI. The plugin checks `DSH_GROK_BIN`, then `${GROK_HOME:-$HOME/.grok}/bin/grok`, then `grok` on `PATH`. On Windows the `PATHEXT` suffixes (`.exe`, `.cmd`, …) are completed too, so a `grok.exe` install is recognised. See [session.js](../src/session.js).
+Sign-in happens on the DSH Host, not on another device that is only viewing the page. **Sign in** in Settings requests a device code from `https://auth.x.ai`, shows the link and one-time code, and tries to open a browser. After authorization the plugin writes the session to `${GROK_HOME:-$HOME/.grok}/auth.json`. If that file is already present, select **Read saved session**. An `XAI_API_KEY`-only entry is not a Grok Build subscription session. Never copy `auth.json`, access tokens, or refresh tokens into chats or public reports.
 
-Use **CLI login** or **Device-code login** in Settings. The plugin invokes the official CLI and shows the available authorization link and one-time code in the panel. Alternatively, run this locally:
-
-```sh
-grok login
-```
-
-After authorizing, select **Pull from Grok CLI**. An `XAI_API_KEY`-only configuration is not a Grok Build subscription session. Never copy `auth.json`, access tokens, or refresh tokens into chats or public reports.
-
-The plugin reads `${GROK_HOME:-$HOME/.grok}/auth.json` and rejects symlinks, non-regular files, and unsafe ownership or permissions. On macOS / Linux, after confirming the path and owner are correct, fix permission bits with:
+Reads and writes reject symlinks, non-regular files, and unsafe ownership or permissions. On macOS / Linux, after confirming the path and owner are correct, fix permission bits with:
 
 ```sh
 chmod 600 "${GROK_HOME:-$HOME/.grok}/auth.json"
 ```
 
-This does not fix an incorrect owner or make a symlink safe. The plugin itself does not write the file; the official CLI manages the session file and renewal. DSH stores only the short-lived access token it needs, without returning tokens through browser RPC. See [SECURITY.md](../SECURITY.md).
+This does not fix an incorrect owner or make a symlink safe. The plugin updates only the OAuth entry and keeps the file mode `0600`; other entries, including an API key, are left in place. DSH stores only the short-lived access token it needs. The refresh token stays in this file and is not returned through browser RPC. See [SECURITY.md](../SECURITY.md).
 
 ## Model catalog and reasoning
 
@@ -47,7 +39,7 @@ After sign-in, the plugin prefers the catalog from `/v1/models-v2`; while signed
 
 Reasoning options follow model metadata. The implementation recognizes `low` / `medium` / `high` / `xhigh`, usually defaulting to `high`; the built-in `grok-4.5` entry has only the first three. Follow the actual menu and backend-supported choices. See [catalog.js](../src/catalog.js).
 
-Login, pull, logout, and catalog refresh notify the model picker. Near a known token expiry the plugin renews through the official CLI. If renewal fails, or the server has already revoked the session, authorization may still be required again; uninterrupted sessions are not guaranteed.
+Login, reading a saved session, logout, and catalog refresh notify the model picker. Near a known token expiry the plugin renews with the refresh token in auth.json against `https://auth.x.ai`. If renewal fails, or the server has already revoked the session, authorization may still be required again; uninterrupted sessions are not guaranteed.
 
 ## Image input
 
@@ -75,13 +67,13 @@ For prefix caching, the plugin pins one stable `prompt_cache_key` per DSH sessio
 
 ## Troubleshooting
 
-**`grok` not found or no login window.** Check that the CLI is installed on the DSH Host and its process sees `DSH_GROK_BIN` / `PATH`. Look for a clickable login link in the panel. A browser failing to open does not by itself prove the authorization service is unreachable. On Windows, if the CLI is not on `PATH`, put the absolute `grok.exe` path in the user-level `DSH_GROK_BIN` (for example `setx DSH_GROK_BIN "C:\Users\<user>\.grok\bin\grok.exe"`) and restart DSH completely; note that `DSH_*` is a DSH bootstrap prefix, so declaring it in `~/.dsh/.env` makes that environment layer fail.
+**No sign-in window.** Look for a clickable authorization link and code in the panel. A browser failing to open does not by itself prove `auth.x.ai` is unreachable; use “Open the sign-in page”. When a proxy is needed, set `https_proxy` in DSH's launch environment or `~/.dsh/.env`, then restart completely. `DSH_*` is a DSH bootstrap prefix, so declaring it in `~/.dsh/.env` makes that environment layer fail.
 
 **`fetch failed` or `Billing request timed out`.** Check access to the account service and `cli-chat-proxy.grok.com` separately. When a proxy is needed, set standard `https_proxy` / `http_proxy` variables in DSH's launch environment or `~/.dsh/.env`, not the project directory's `.env`, then manually restart DSH. The plugin uses the host network setup rather than providing its own proxy service. Network conditions are one possibility; also check authentication and backend errors.
 
-**Empty model list.** Complete subscription sign-in and select **Pull from Grok CLI**. Check for an API-key-only login entry and inspect catalog status without sharing raw responses.
+**Empty model list.** Finish subscription sign-in, or select **Read saved session**. Check for an API-key-only entry and inspect catalog status without sharing raw responses.
 
-**Chat or usage returns `401`.** Check the CLI session. If automatic renewal fails, run `grok login` again, authorize, and pull the session. Do not repeatedly paste an old token.
+**Chat or usage returns `401`.** If automatic renewal fails, sign in again from Settings. Do not repeatedly paste an old token.
 
 **Images rejected.** Check the supported IDs, confirm **Active path** reads **official pi-ai** with attachment capability available, and fully restart the desktop app after updating.
 
@@ -101,14 +93,14 @@ In the desktop app the `desktop` profile is owned exclusively by the Electron ap
 
 ```sh
 cd "$HOME/.dsh/profiles/desktop"    # Windows: cd "$env:USERPROFILE\.dsh\profiles\desktop"
-pnpm add --save-exact --config.minimumReleaseAge=0 dsh-grok-subscription@2.0.3
+pnpm add --save-exact --config.minimumReleaseAge=0 dsh-grok-subscription@2.0.4
 ```
 
 Then quit and restart the desktop app completely. After a successful update the profile's `package.json` dependency should show the target version while its `dsh.profile.bundles` entry is unchanged. Refreshing the browser is not enough: without a Host restart the old version keeps loading.
 
-**Uninstall:** remove `dsh-grok-subscription` in **Settings → Plugins**, or run `pnpm remove dsh-grok-subscription` in that profile directory. This leaves the profile, other plugins, and the CLI's `auth.json` intact.
+**Uninstall:** remove `dsh-grok-subscription` in **Settings → Plugins**, or run `pnpm remove dsh-grok-subscription` in that profile directory. This leaves the profile, other plugins, and `~/.grok/auth.json` intact.
 
-The Settings logout action clears plugin-side session state; it does not revoke the official CLI session. If the CLI file remains, a later pull or startup may sync it again. To end the official session, use the official CLI / account's sign-out and authorization-management flow. Do not delete an entire DSH profile to handle one account.
+The Settings logout action clears plugin-side session state. It does not delete `auth.json` and does not revoke the xAI authorization. If the file remains, a later read or Settings open may sync the session again. Do not delete an entire DSH profile to handle one account.
 
 ## Local development
 

@@ -28,11 +28,11 @@ export const inject = [
 /** Client-side safety net so Settings never sticks on Working… forever. */
 const RPC_CALL_TIMEOUT_MS = 12_000
 /**
- * Sign-in answers once `grok login` prints its URL, which can take a moment on a
- * cold or slow network; the browser round trip itself is not awaited.
+ * Sign-in answers once the device-code endpoint returns a link, which can take
+ * a moment on a cold or slow network; the browser round trip itself is not awaited.
  */
 const LOGIN_CALL_TIMEOUT_MS = 30_000
-/** How long the panel keeps polling for the session the CLI is authorizing. */
+/** How long the panel keeps polling for the session the host is authorizing. */
 const LOGIN_POLL_INTERVAL_MS = 3_000
 const LOGIN_POLL_TIMEOUT_MS = 10 * 60_000
 
@@ -344,7 +344,7 @@ export function GrokSubscriptionSection({ rpc, t }) {
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [status, setStatus] = useState(undefined)
-  /** A `grok login` the host started and is watching; the browser round trip owns the rest. */
+  /** Device-code sign-in is in flight; the browser round trip owns the rest. */
   const [loginPending, setLoginPending] = useState(undefined)
   const initialUsageKick = useRef(false)
 
@@ -402,8 +402,8 @@ export function GrokSubscriptionSection({ rpc, t }) {
       })
   }
 
-  // While `grok login` waits on the browser, poll the session instead of holding
-  // one long RPC: the host answers as soon as the sign-in URL is known.
+  // While the device-code grant waits on the browser, poll the session instead
+  // of holding one long RPC: the host answers as soon as the sign-in URL is known.
   useEffect(() => {
     if (!loginPending) return undefined
     const startedAt = Date.now()
@@ -450,7 +450,7 @@ export function GrokSubscriptionSection({ rpc, t }) {
         setNotice('')
         setError(value.error)
       } else if (value?.pending === true) {
-        // The CLI is waiting on the browser; the panel polls until the session lands.
+        // The device-code grant is waiting on the browser; the panel polls until the session lands.
         setLoginPending({ url: value.loginUrl, code: value.userCode, warning: value.warning })
         setNotice('')
       } else if (value?.ok !== false) {
@@ -507,7 +507,6 @@ export function GrokSubscriptionSection({ rpc, t }) {
         </div>
         <div className="gsActions">
           <button className="gsBtn gsBtn--primary" type="button" disabled={Boolean(busy) || Boolean(loginPending)} onClick={() => void run('login/cli')}>{t('loginCli')}</button>
-          <button className="gsBtn" type="button" disabled={Boolean(busy) || Boolean(loginPending)} onClick={() => void run('login/device')}>{t('loginDevice')}</button>
           <button className="gsBtn" type="button" disabled={Boolean(busy)} onClick={() => void run('pull')}>{t('pull')}</button>
           <button className="gsBtn gsBtn--danger" type="button" disabled={Boolean(busy) || !signedIn} onClick={() => void run('logout')}>{t('logout')}</button>
         </div>
@@ -524,7 +523,6 @@ export function GrokSubscriptionSection({ rpc, t }) {
         {loginPending?.warning ? <p className="gsStatus gsStatus--warn">{t('loginNoUrl')}</p> : null}
         {notice ? <p className="gsStatus gsStatus--ok">{notice}</p> : null}
         {error ? <p className="gsStatus gsStatus--error">{t('error')}: {error}</p> : null}
-        {status?.cliAvailable === false ? <p className="gsStatus gsStatus--warn">{t('cliMissing')}</p> : null}
         <DiagnosticsRows diagnostics={status?.diagnostics} t={t} />
         {status?.diagnostics && !status.diagnostics.imageInput
           ? <p className="gsHint">{t('adapterHint')}</p>

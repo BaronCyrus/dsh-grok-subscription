@@ -8,7 +8,7 @@
 
 **用 Grok Build 订阅，在 DSH 里编程、看图、切换推理档位。**
 
-复用官方 Grok Build CLI 登录会话，在 DeepSeek Harness 中选模型、带图提问、查看每周额度。
+用 SuperGrok / X Premium 的 Grok Build 会话，在 DeepSeek Harness 中选模型、带图提问、查看每周额度。
 无需另配 xAI 按量计费 API Key。
 
 [![CI](https://github.com/BaronCyrus/dsh-grok-subscription/actions/workflows/ci.yml/badge.svg)](https://github.com/BaronCyrus/dsh-grok-subscription/actions/workflows/ci.yml)
@@ -27,12 +27,12 @@
 
 | 能力 | 使用体验 |
 | --- | --- |
-| **复用订阅登录** | 在设置页发起 CLI / 设备码登录，或拉取已有 Grok CLI 会话，无需手动粘贴 token |
+| **订阅登录** | 在设置页用设备码登录，或读取已有的 `auth.json`，无需安装 grok 命令，也不用手动粘贴 token |
 | **模型目录同步** | 登录后优先读取账号模型目录；读取失败时可使用内置目录，未登录时不显示模型 |
 | **推理档位** | 在模型菜单中选择可用档位，通常包含 `low` / `medium` / `high` / `xhigh`，默认优先使用 `high` |
 | **图片输入** | 支持的模型可接收粘贴或附加的图片；设置页可检查当前运行通路与附件能力 |
 | **每周额度** | 输入框徽章和设置页展示服务端返回的用量；额度接口为实验性，读取失败不编造数字 |
-| **会话续期与更新** | 临近过期或认证拒绝时尝试通过官方 CLI 续期；设置页也可检查插件版本 |
+| **会话续期与更新** | 临近过期或认证拒绝时用 refresh token 续期；设置页也可检查插件版本 |
 | **凭据不返回浏览器** | access token 仅在 Host 侧使用；订阅失败不会静默改用其他付费模型路由 |
 
 <a id="三步开始"></a>
@@ -40,9 +40,9 @@
 
 ## 安装
 
-需要 **DeepSeek Harness**、运行在同一台机器上的**官方 Grok Build CLI**，以及**当前具有 Grok Build 使用资格**的 SuperGrok / X Premium 账号。订阅名称本身不保证访问资格，以账号实际授权为准。
+需要 **DeepSeek Harness**，以及**当前具有 Grok Build 使用资格**的 SuperGrok / X Premium 账号。不需要安装 grok 命令。订阅名称本身不保证访问资格，以账号实际授权为准。
 
-尚未安装 DSH，可查看 [DSH 官方说明](https://github.com/deepseek-ai/deepseek-harness#run)。版本要求与 CLI 路径说明见 [安装与兼容性](docs/guide.zh-CN.md#安装与兼容性)。
+尚未安装 DSH，可查看 [DSH 官方说明](https://github.com/deepseek-ai/deepseek-harness#run)。版本要求见 [安装与兼容性](docs/guide.zh-CN.md#安装与兼容性)。
 
 ### 1. 安装插件
 
@@ -50,9 +50,9 @@
 
 ### 2. 登录订阅
 
-打开 **设置 → Grok 订阅**，点击 **CLI 登录** 或 **设备码登录**，按浏览器和面板提示授权。已经运行过 `grok login`，可直接点击 **从 Grok CLI 拉取**。
+打开 **设置 → Grok 订阅**，点击 **登录**。面板会给出链接和一次性验证码；授权完成后会话自动写入 `~/.grok/auth.json`。如果这台机器上已经有一份会话文件，点击 **读取已保存的会话**。
 
-> 本插件依赖官方 Grok Build CLI 管理登录与续期，不是免 CLI 的方案。请勿粘贴 `XAI_API_KEY`，也不要把 `auth.json` 或 token 发到聊天、截图和公开 Issue 中。
+> 登录和续期由插件自己完成，不调用 grok 命令。请勿粘贴 `XAI_API_KEY`，也不要把 `auth.json` 或 token 发到聊天、截图和公开 Issue 中。
 
 ### 3. 选择模型
 
@@ -61,16 +61,16 @@
 <details>
 <summary>确认版本 / 固定版本 / 界面安装失败时的兜底</summary>
 
-**设置 → 插件** 会列出已安装插件与版本，插件自己的 **设置 → Grok 订阅** 页也有版本卡片。要固定版本，在安装框里填入完整的 `包名@版本`，例如 `dsh-grok-subscription@2.0.3`。
+**设置 → 插件** 会列出已安装插件与版本，插件自己的 **设置 → Grok 订阅** 页也有版本卡片。要固定版本，在安装框里填入完整的 `包名@版本`，例如 `dsh-grok-subscription@2.0.4`。
 
 界面安装失败时（例如 profile 目录权限异常），可以对桌面版 profile 手动执行等价操作（pnpm ≥ 11）：
 
 ```sh
 cd "$HOME/.dsh/profiles/desktop"    # Windows: cd "$env:USERPROFILE\.dsh\profiles\desktop"
-pnpm add --save-exact --config.minimumReleaseAge=0 dsh-grok-subscription@2.0.3
+pnpm add --save-exact --config.minimumReleaseAge=0 dsh-grok-subscription@2.0.4
 ```
 
-`dsh plugin --profile desktop …` 会被拒绝：桌面版 profile 由 Electron 应用独占。CLI 路径、登录方式与故障排查见 [完整使用指南](docs/guide.zh-CN.md)。
+`dsh plugin --profile desktop …` 会被拒绝：桌面版 profile 由 Electron 应用独占。登录方式与故障排查见 [完整使用指南](docs/guide.zh-CN.md)。
 
 </details>
 
@@ -111,7 +111,7 @@ pnpm add --save-exact --config.minimumReleaseAge=0 dsh-grok-subscription@2.0.3
 
 ## 使用指南
 
-[完整使用指南](docs/guide.zh-CN.md) 包含安装与兼容性、CLI 登录、模型目录、图片输入、额度限制、网络排查和本地开发。
+[完整使用指南](docs/guide.zh-CN.md) 包含安装与兼容性、设备码登录、模型目录、图片输入、额度限制、网络排查和本地开发。
 
 常用入口：[登录与凭据](docs/guide.zh-CN.md#登录与凭据) · [图片输入](docs/guide.zh-CN.md#图片输入) · [故障排查](docs/guide.zh-CN.md#故障排查) · [参与贡献](CONTRIBUTING.md)。
 
@@ -121,11 +121,11 @@ pnpm add --save-exact --config.minimumReleaseAge=0 dsh-grok-subscription@2.0.3
 
 桌面版由 Electron 应用独占 `desktop` profile，`dsh plugin --profile desktop …` 会被直接拒绝，因此桌面版的「更新插件」由插件在该 profile 目录中用 DSH 自带的 pnpm 安装精确版本；`1.1.1` 之前该按钮在桌面版必然失败，手动步骤见[更新与登出](docs/guide.zh-CN.md#更新与登出)。
 
-**卸载：** 在 **设置 → 插件** 里移除 `dsh-grok-subscription`，或在该 profile 目录执行 `pnpm remove dsh-grok-subscription`，然后重启桌面应用。卸载不会删除其他插件、整个 profile 或 Grok CLI 的 `auth.json`，也不等于从官方 CLI 登出；清理范围见 [更新与登出](docs/guide.zh-CN.md#更新与登出)。
+**卸载：** 在 **设置 → 插件** 里移除 `dsh-grok-subscription`，或在该 profile 目录执行 `pnpm remove dsh-grok-subscription`，然后重启桌面应用。卸载不会删除其他插件、整个 profile 或 `~/.grok/auth.json`，也不等于在 xAI 撤销授权；清理范围见 [更新与登出](docs/guide.zh-CN.md#更新与登出)。
 
 ## 常见问题
 
-**模型列表为空？** 先确认官方 Grok CLI 已完成订阅登录，再在设置页点击「从 Grok CLI 拉取」。只有 API Key 的 CLI 配置不等于订阅登录。
+**模型列表为空？** 先在设置页完成订阅登录，或点击「读取已保存的会话」。只有 API Key 的条目不等于订阅登录。
 
 **登录或请求超时？** 检查 DSH 所在机器能否连接账号与订阅服务，以及启动环境的代理设置。网络、登录状态和服务端异常都可能导致失败，不要直接认定为额度耗尽。见 [故障排查](docs/guide.zh-CN.md#故障排查)。
 

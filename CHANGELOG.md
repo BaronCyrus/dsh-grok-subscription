@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.0.4 — 2026-09-30
+
+- **Sign-in and renewal no longer run the grok command.** Settings requests a device code from `https://auth.x.ai`, shows the link and one-time code, and writes the session into `${GROK_HOME:-~/.grok}/auth.json` after the browser confirms it. A token near expiry is renewed with the refresh token at the same token endpoint. The official CLI binary is not required, and an `auth.json` already written by `grok login` can still be loaded with **Read saved session**.
+- Only the OAuth entry is rewritten. API-key entries stay. The file is replaced atomically and kept at mode `0600`; a symlink is still refused. The refresh token is not copied into DSH credentials and is not returned to the browser. The device code stays in the host process.
+- No model-routing, image, or quota behavior changes.
+
 ## 2.0.3 — 2026-09-29
 
 - Use the **documented context window**, not the 256k value `models-v2` currently returns. The public model table lists `grok-4.7`, `grok-4.6` and `grok-4.5` at 500k, and `grok-4.7` Fast as the same model; only `grok-build-0.1` is 256k. The subscription catalog reports `context_window: 256000` for all four Build models anyway. A model id in that table now keeps the documented window (`grok-4.7-build-fast` included) even when the catalog says otherwise. An id that is not in the table still uses the catalog value, and the static fallback when a window is missing is 500k again.

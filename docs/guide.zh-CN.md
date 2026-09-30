@@ -6,9 +6,9 @@
 
 ## 安装与兼容性
 
-需要 DeepSeek Harness 桌面版、官方 Grok Build CLI，以及当前具有 Grok Build 使用资格的订阅账号。插件的 Node.js 要求为 `^22.19.0 || >=24.0.0`，DSH peer 声明以 [package.json](../package.json) 为准；其中 DSH 依赖使用 `>=0.1.5-rc.2 <0.3.0-0`，覆盖 0.1 与 0.2 全线。声明范围不等于所有版本都已经过实机验证。
+需要 DeepSeek Harness 桌面版，以及当前具有 Grok Build 使用资格的订阅账号。不需要安装 grok 命令。插件的 Node.js 要求为 `^22.19.0 || >=24.0.0`，DSH peer 声明以 [package.json](../package.json) 为准；其中 DSH 依赖使用 `>=0.1.5-rc.2 <0.3.0-0`，覆盖 0.1 与 0.2 全线。声明范围不等于所有版本都已经过实机验证。
 
-**安装：** 在桌面版打开 **设置 → 插件**，在安装输入框里填入包名 `dsh-grok-subscription` 并安装，然后**完全退出并重启桌面应用**。仅刷新页面不会重新加载 Host 中的适配器。需要可重复安装时，填入完整的 `包名@版本`，例如 `dsh-grok-subscription@2.0.3`。
+**安装：** 在桌面版打开 **设置 → 插件**，在安装输入框里填入包名 `dsh-grok-subscription` 并安装，然后**完全退出并重启桌面应用**。仅刷新页面不会重新加载 Host 中的适配器。需要可重复安装时，填入完整的 `包名@版本`，例如 `dsh-grok-subscription@2.0.4`。
 
 **插件依赖宿主自带的 pi-ai 适配器。** 从 2.0.0 起，`grok-build` 路由完全由宿主的 `@deepseek-ai/dsh-llm-pi-ai` / `@earendil-works/pi-ai` 服务；DSH 的任何安装方式都带有它们（`@deepseek-ai/dsh` → `dsh-base` → `dsh-llm-pi-ai`，且 `llm-pi-ai` 行无条件挂载）。这两个包无法从 DSH 安装目录解析时，插件不会注册任何路由，设置页的「运行通路」显示**不可用**。
 
@@ -16,30 +16,22 @@
 
 ```sh
 cd "$HOME/.dsh/profiles/desktop"    # Windows: cd "$env:USERPROFILE\.dsh\profiles\desktop"
-pnpm add --save-exact --config.minimumReleaseAge=0 dsh-grok-subscription@2.0.3
+pnpm add --save-exact --config.minimumReleaseAge=0 dsh-grok-subscription@2.0.4
 ```
 
 `dsh plugin --profile desktop …` 会被直接拒绝：桌面版 profile 由 Electron 应用独占。
 
 ## 登录与凭据
 
-**官方 Grok Build CLI 必须在 DSH Host 上可用**，不是只安装在访问网页的手机或另一台电脑上。插件按以下顺序寻找命令：`DSH_GROK_BIN` 指定的路径、`${GROK_HOME:-$HOME/.grok}/bin/grok`、系统 `PATH` 中的 `grok`。Windows 上按 `PATHEXT` 补全后缀（`.exe`、`.cmd` 等），所以安装成 `grok.exe` 也能识别。实现见 [session.js](../src/session.js)。
+登录在 DSH Host 本机完成，不是在看网页的另一台设备上。设置页的 **登录** 向 `https://auth.x.ai` 申请设备码，把链接和一次性验证码显示在面板里，并尝试打开浏览器。授权完成后，插件把会话写入 `${GROK_HOME:-$HOME/.grok}/auth.json`。已经有这份文件时，点 **读取已保存的会话**。只有 `XAI_API_KEY` 的条目不属于 Grok Build 订阅登录。不要复制 `auth.json`、access token 或 refresh token 到聊天和公开问题中。
 
-可在设置页发起 **CLI 登录** 或 **设备码登录**；插件会调用官方 CLI，并将可用的授权链接和一次性验证码显示在面板中。也可以自行在本机运行：
-
-```sh
-grok login
-```
-
-授权完成后点击 **从 Grok CLI 拉取**。只有 `XAI_API_KEY` 的配置不属于 Grok Build 订阅登录。不要复制 `auth.json`、access token 或 refresh token 到聊天和公开问题中。
-
-插件读取 `${GROK_HOME:-$HOME/.grok}/auth.json`，拒绝符号链接、非普通文件及不安全的所有权或权限。在 macOS / Linux 上，确认路径和所有者正确后，可修正权限：
+插件读写这个文件时拒绝符号链接、非普通文件及不安全的所有权或权限。在 macOS / Linux 上，确认路径和所有者正确后，可修正权限：
 
 ```sh
 chmod 600 "${GROK_HOME:-$HOME/.grok}/auth.json"
 ```
 
-此命令不能修正错误所有者，也不能把符号链接变成安全文件。插件自身不写回这个文件；官方 CLI 会管理会话文件和续期。DSH 只保存使用所需的短期 access token，不把 token 通过浏览器 RPC 返回。详见 [SECURITY.md](../SECURITY.md)。
+此命令不能修正错误所有者，也不能把符号链接变成安全文件。插件只更新其中的 OAuth 条目，并保持文件为 `0600`；其他条目（包括 API key）会保留。DSH 只保存使用所需的短期 access token，refresh token 留在这个文件里，不通过浏览器 RPC 返回。详见 [SECURITY.md](../SECURITY.md)。
 
 ## 模型目录与推理档位
 
@@ -47,7 +39,7 @@ chmod 600 "${GROK_HOME:-$HOME/.grok}/auth.json"
 
 推理档位按模型元数据提供。当前实现识别 `low` / `medium` / `high` / `xhigh`，通常默认 `high`；内置 `grok-4.5` 目录只包含前三档。以实际菜单与服务端接受的选项为准。实现见 [catalog.js](../src/catalog.js)。
 
-登录、拉取、登出和目录刷新会通知模型选择器更新。临近已知的 token 到期时间时，插件会通过官方 CLI 续期；若续期失败或服务端已撤销会话，仍需要重新授权，不承诺会话永不失效。
+登录、读取会话、登出和目录刷新会通知模型选择器更新。临近已知的 token 到期时间时，插件用 auth.json 里的 refresh token 向 `https://auth.x.ai` 续期；若续期失败或服务端已撤销会话，仍需要重新授权，不承诺会话永不失效。
 
 ## 图片输入
 
@@ -75,13 +67,13 @@ grok-4.6
 
 ## 故障排查
 
-**找不到 `grok` / 不弹出登录窗口。** 检查 CLI 是否安装在 DSH Host、`DSH_GROK_BIN` / `PATH` 是否对该进程可见，以及面板是否已显示可点击授权链接。浏览器没有弹出，不一定等于授权服务不可达。Windows 上若 CLI 不在 `PATH` 中，可把 `grok.exe` 的绝对路径写入用户级 `DSH_GROK_BIN`（例如 `setx DSH_GROK_BIN "C:\Users\<用户>\.grok\bin\grok.exe"`），再完全重启 DSH；注意 `DSH_*` 是 DSH 的 bootstrap 前缀，写进 `~/.dsh/.env` 会让该环境层直接报错。
+**没有弹出登录窗口。** 看面板是否已经显示可点击的授权链接和验证码。浏览器没有弹出，不一定等于 `auth.x.ai` 不可达；点「打开登录页面」。需要代理时，在 DSH 启动环境或 `~/.dsh/.env` 设置 `https_proxy` 后完全重启。注意 `DSH_*` 是 DSH 的 bootstrap 前缀，写进 `~/.dsh/.env` 会让该环境层直接报错。
 
 **`fetch failed` / `Billing request timed out`。** 分别检查账号服务和 `cli-chat-proxy.grok.com` 的网络连接。需要代理时，在 DSH 启动环境或 `~/.dsh/.env` 中设置标准 `https_proxy` / `http_proxy`，而不是放进项目目录的 `.env`；再手动重启 DSH。插件沿用宿主网络配置，不提供单独代理服务。网络只是可能原因，还应检查认证和服务端错误。
 
-**模型列表为空。** 先完成订阅登录并点击「从 Grok CLI 拉取」。检查是否只有 API-key 登录条目；查看目录状态，不要公开原始响应。
+**模型列表为空。** 先完成订阅登录，或点击「读取已保存的会话」。检查是否只有 API-key 条目；查看目录状态，不要公开原始响应。
 
-**聊天或用量返回 `401`。** 检查 CLI 会话是否有效。自动续期失败时，重新运行 `grok login`，完成授权后再次拉取。不要反复粘贴旧 token。
+**聊天或用量返回 `401`。** 自动续期失败时，在设置页重新登录。不要反复粘贴旧 token。
 
 **图片被拒绝。** 对照图片支持列表，确认设置页「运行通路」显示**官方 pi-ai** 且附件能力可用，并在更新后完整重启桌面应用。
 
@@ -101,14 +93,14 @@ grok-4.6
 
 ```sh
 cd "$HOME/.dsh/profiles/desktop"    # Windows: cd "$env:USERPROFILE\.dsh\profiles\desktop"
-pnpm add --save-exact --config.minimumReleaseAge=0 dsh-grok-subscription@2.0.3
+pnpm add --save-exact --config.minimumReleaseAge=0 dsh-grok-subscription@2.0.4
 ```
 
 然后完全退出并重启桌面版。更新成功后该 profile 的 `package.json` 里依赖应变为目标版本，`dsh.profile.bundles` 条目保持不变。仅刷新网页不够：Host 未重启时仍会加载旧版本。
 
-**卸载：** 在 **设置 → 插件** 里移除 `dsh-grok-subscription`，或在该 profile 目录执行 `pnpm remove dsh-grok-subscription`。这不删除整个 profile、其他插件或 Grok CLI 的 `auth.json`。
+**卸载：** 在 **设置 → 插件** 里移除 `dsh-grok-subscription`，或在该 profile 目录执行 `pnpm remove dsh-grok-subscription`。这不删除整个 profile、其他插件或 `~/.grok/auth.json`。
 
-设置页「登出」清理的是插件侧会话状态，不等于撤销官方 CLI 会话。CLI 文件仍然存在时，之后重新拉取或启动可能再次同步登录；彻底结束官方会话应使用官方 CLI / 账号提供的登出与授权管理流程。不要靠删除整个 DSH profile 来处理一个账号。
+设置页「登出」清理的是插件侧会话状态，不会删除 `auth.json`，也不等于在 xAI 撤销授权。文件还在时，之后读取会话或重新打开设置可能再次同步登录。不要靠删除整个 DSH profile 来处理一个账号。
 
 ## 本地开发
 

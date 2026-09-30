@@ -8,7 +8,10 @@ function stripSecrets(value) {
   delete next.accessToken
   delete next.token
   delete next.refresh
+  delete next.refreshToken
   delete next.refresh_token
+  delete next.deviceCode
+  delete next.device_code
   delete next.key
   if (next.catalog) {
     next.catalog = {
@@ -144,8 +147,8 @@ export function createRpcHandler(session, options = {}) {
       // manager owns that bounded timeout, so wrapping it here would cancel a
       // healthy install.
       if (endpoint === 'plugin/update') return await operation
-      // Login answers once the CLI prints its sign-in URL (it waits on the
-      // browser in the background), which can outlast a plain account RPC.
+      // Login answers once the device-code endpoint returns a link. The browser
+      // round trip is polled in the background, so this can outlast a plain RPC.
       const ceiling = endpoint === 'login/cli' || endpoint === 'login/device' ? loginTimeoutMs : timeoutMs
       return await withTimeout(
         operation,

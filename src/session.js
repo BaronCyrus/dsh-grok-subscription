@@ -1,102 +1,28 @@
-import { existsSync } from 'node:fs'
 import { spawn } from 'node:child_process'
-import { join } from 'node:path'
 import {
-  CLI_REFRESH_TIMEOUT_MS,
   CREDENTIAL_REF_NAME,
   CREDENTIALS_IO_TIMEOUT_MS,
-  LOGIN_START_TIMEOUT_MS,
+  GROK_OIDC_CLIENT_ID,
   STORE_TOKEN_TIMEOUT_MS,
   TOKEN_EXPIRY_SKEW_MS,
+  XAI_OAUTH_ISSUER,
 } from './constants.js'
-import { authJsonPath, grokHome, publicSessionView, readGrokAuthSession } from './auth-file.js'
+import { authJsonPath, publicSessionView, readGrokAuthSession, writeOauthSession } from './auth-file.js'
 import { loadCatalog as defaultLoadCatalog } from './catalog.js'
 import { fetchBillingUsage as defaultFetchBillingUsage, unavailableUsage } from './usage.js'
 import { optionalImport } from './adapter.js'
-
-/**
- * Suffixes Windows appends when resolving a bare command, used only when
- * `PATHEXT` is missing or empty.
- */
-const WINDOWS_EXEC_EXTENSIONS = ['.COM', '.EXE', '.BAT', '.CMD']
-
-const hasPathSeparator = value => value.includes('/') || value.includes('\\')
-
-/**
- * Every file name the platform would accept for one command. `fs.existsSync`
- * never applies Windows' `PATHEXT` resolution, so probing `grok` misses the
- * installed `grok.exe`; the suffixes `spawn` can run have to be tried
- * explicitly, and `PATHEXT` decides which ones — exactly as it does for `spawn`.
- */
-function executableNames(bin, platform, env) {
-  if (platform !== 'win32') return [bin]
-  const declared = String(env.PATHEXT ?? '')
-    .split(';')
-    .map(part => part.trim())
-    .filter(Boolean)
-    .map(part => (part.startsWith('.') ? part : `.${part}`))
-  const extensions = declared.length > 0 ? declared : WINDOWS_EXEC_EXTENSIONS
-  return [bin, ...extensions.map(extension => `${bin}${extension}`)]
-}
-
-function firstExisting(names, exists) {
-  for (const name of names) if (exists(name)) return name
-  return undefined
-}
-
-/** Quotes are PATH syntax on Windows (`"C:\Program Files\…"`), not part of the path. */
-function pathEntry(dir, platform) {
-  return platform === 'win32' && dir.length > 1 && dir.startsWith('"') && dir.endsWith('"')
-    ? dir.slice(1, -1)
-    : dir
-}
-
-/**
- * The CLI to spawn: an explicit `DSH_GROK_BIN`, else the one installed in the
- * Grok home, else the bare command name for `PATH` lookup.
- * @param env - environment holding `DSH_GROK_BIN`, `GROK_HOME`, and `PATHEXT`.
- * @param exists - injectable existence probe.
- * @param platform - injectable platform, so the Windows branch is testable anywhere.
- * @returns an existing path when one is found, otherwise a name for `spawn` to resolve.
- */
-export function resolveGrokBin(env = process.env, exists = existsSync, platform = process.platform) {
-  const override = typeof env.DSH_GROK_BIN === 'string' && env.DSH_GROK_BIN.trim()
-    ? env.DSH_GROK_BIN.trim()
-    : undefined
-  if (override !== undefined) {
-    // A bare override is a command name for `spawn`; a path is completed with
-    // the platform's executable suffixes so detection and spawn agree.
-    if (!hasPathSeparator(override)) return override
-    return firstExisting(executableNames(override, platform, env), exists) ?? override
-  }
-  const local = join(grokHome(env), 'bin', 'grok')
-  const installed = firstExisting(executableNames(local, platform, env), exists)
-  if (installed !== undefined) return installed
-  return 'grok'
-}
-
-/**
- * Whether the official CLI can run here. Windows installs it as `grok.exe`
- * while `DSH_GROK_BIN` and `PATH` name it `grok`, so the probe — not the spawn,
- * which resolves the suffix itself — is what has to try every suffix.
- * @param env - environment holding `DSH_GROK_BIN`, `GROK_HOME`, `PATH`, and `PATHEXT`.
- * @param exists - injectable existence probe.
- * @param platform - injectable platform, so the Windows branch is testable anywhere.
- */
-export function grokCliAvailable(env = process.env, exists = existsSync, platform = process.platform) {
-  const bin = resolveGrokBin(env, exists, platform)
-  if (hasPathSeparator(bin)) return exists(bin)
-  const delimiter = platform === 'win32' ? ';' : ':'
-  const names = executableNames(bin, platform, env)
-  return String(env.PATH ?? '')
-    .split(delimiter)
-    .some(dir => dir && names.some(name => exists(join(pathEntry(dir, platform), name))))
-}
+import {
+  discoverOauthEndpoints,
+  exchangeDeviceCode,
+  isXaiHttpsUrl,
+  refreshOauthToken,
+  requestDeviceAuthorization,
+} from './oauth.js'
 
 /**
  * Hand a URL to the user's browser. The desktop host owns no terminal, so the
- * CLI cannot deliver its sign-in link by itself: without a TTY `grok login`
- * prints the URL to stderr and waits, and inherited stderr goes nowhere.
+ * sign-in link has to be opened from here; the panel also shows it when the
+ * opener does not run.
  * @param url - absolute http(s) URL to open.
  * @param options - injectable spawn and platform, for tests.
  * @returns true when the platform opener exited cleanly.
@@ -130,169 +56,67 @@ export function openExternal(url, options = {}) {
   })
 }
 
-/** First http(s) URL in the CLI's sign-in output. */
-const LOGIN_URL_PATTERN = /https?:\/\/[^\s<>"'`\\]+/u
-/** Device code the CLI prints beside that URL (`XXXX-XXXX`). */
-const DEVICE_CODE_PATTERN = /\b([A-Z0-9]{4}-[A-Z0-9]{4})\b/u
-
-/**
- * Start `grok login` and hand back the sign-in URL it prints.
- *
- * Without a TTY the CLI cannot open a browser itself: it prints "open this URL
- * in your browser" plus a device code to stderr and waits (its own budget is
- * minutes). This reads that stream, opens the link for the user, and resolves as
- * soon as the link is known — the child stays alive so the caller can sync the
- * session when authorization completes. A CLI that inherits stdio (no pipes)
- * keeps the plain "resolve on exit" behaviour.
- * @param options - env/bin overrides, injectable spawn/openUrl, start timeout.
- * @returns `{ ok, pending, loginUrl?, userCode?, child?, warning? }`.
- */
-export async function spawnGrokLogin(options = {}) {
-  const spawnFn = options.spawn ?? spawn
-  const bin = resolveGrokBin(options.env, options.exists)
-  const args = options.device ? ['login', '--device-auth'] : ['login']
-  const startTimeoutMs = typeof options.startTimeoutMs === 'number' && options.startTimeoutMs > 0
-    ? options.startTimeoutMs
-    : LOGIN_START_TIMEOUT_MS
-  const openUrl = options.openUrl ?? (url => openExternal(url, { spawn: options.openSpawn }))
-  return new Promise((resolve, reject) => {
-    let child
-    try {
-      child = spawnFn(bin, args, {
-        stdio: options.stdio ?? ['ignore', 'pipe', 'pipe'],
-        env: options.env ?? process.env,
-      })
-    } catch (error) {
-      reject(new Error(`Could not start grok CLI (${bin})`, { cause: error }))
-      return
-    }
-    let settled = false
-    let loginUrl
-    let userCode
-    let buffer = ''
-    let timer
-    const succeed = value => {
-      if (settled) return
-      settled = true
-      if (timer) clearTimeout(timer)
-      resolve(value)
-    }
-    /** First link wins; the code may arrive in the same chunk or a later one. */
-    const scan = text => {
-      if (text) buffer = `${buffer}${text}`.slice(-8192)
-      if (!userCode) {
-        const code = DEVICE_CODE_PATTERN.exec(buffer)
-        if (code) userCode = code[1]
-      }
-      if (loginUrl) return
-      const match = LOGIN_URL_PATTERN.exec(buffer)
-      if (!match) return
-      loginUrl = match[0]
-      try {
-        void openUrl(loginUrl)
-      } catch {
-        // Best effort: the reply still carries the URL for the panel to show.
-      }
-      succeed({ ok: true, pending: true, loginUrl, userCode, child })
-    }
-    const piped = Boolean(child.stdout && child.stderr)
-    if (piped) {
-      child.stdout.on('data', chunk => scan(String(chunk)))
-      child.stderr.on('data', chunk => scan(String(chunk)))
-      timer = setTimeout(() => {
-        // No link yet. Keep the child: a slow link can still open a browser, and
-        // the warning tells the panel (and the user) why nothing appeared.
-        succeed({
-          ok: true,
-          pending: true,
-          loginUrl,
-          userCode,
-          child,
-          warning: `grok login printed no sign-in URL within ${startTimeoutMs}ms`,
-        })
-      }, startTimeoutMs)
-    }
-    child.on('error', error => {
-      if (settled) return
-      settled = true
-      if (timer) clearTimeout(timer)
-      reject(new Error(`Could not start grok CLI (${bin})`, { cause: error }))
-    })
-    child.on('exit', (code, signal) => {
-      // After the link was announced the caller owns completion; a rejected
-      // promise there would surface as a spurious failure.
-      if (settled) return
-      settled = true
-      if (timer) clearTimeout(timer)
-      if (code === 0) resolve({ ok: true, pending: false, loginUrl, userCode, child })
-      else reject(new Error(signal ? `grok login terminated by ${signal}` : `grok login exited with code ${code ?? 'unknown'}`))
-    })
+function defaultSleep(ms) {
+  return new Promise(resolve => {
+    const timer = setTimeout(resolve, ms)
+    if (typeof timer.unref === 'function') timer.unref()
   })
 }
 
-/**
- * Lets the official CLI renew its own session. `grok models` is the cheapest
- * command that goes through the CLI's refresh path: it exits in well under a
- * second when the token is still valid, and rewrites auth.json when it is not.
- *
- * The CLI prints "You are not authenticated." even when it *did* refresh, so the
- * exit status says nothing useful — callers must re-read auth.json and compare.
- */
-export async function spawnGrokRefresh(options = {}) {
-  const spawnFn = options.spawn ?? spawn
-  const bin = resolveGrokBin(options.env, options.exists)
-  const timeoutMs = typeof options.timeoutMs === 'number' && options.timeoutMs > 0
-    ? options.timeoutMs
-    : CLI_REFRESH_TIMEOUT_MS
-  return new Promise((resolve, reject) => {
-    let child
-    try {
-      child = spawnFn(bin, ['models'], {
-        stdio: options.stdio ?? 'ignore',
-        env: options.env ?? process.env,
-      })
-    } catch (error) {
-      reject(new Error(`Could not start grok CLI (${bin})`, { cause: error }))
-      return
-    }
-    let settled = false
-    const timer = setTimeout(() => {
-      if (settled) return
-      settled = true
-      try {
-        child.kill('SIGKILL')
-      } catch {
-        // Best effort: the timeout still resolves as a failed refresh.
-      }
-      resolve({ ok: false, reason: 'timeout' })
-    }, timeoutMs)
-    child.on('error', error => {
-      if (settled) return
-      settled = true
-      clearTimeout(timer)
-      reject(new Error(`Could not run grok CLI (${bin})`, { cause: error }))
-    })
-    child.on('exit', code => {
-      if (settled) return
-      settled = true
-      clearTimeout(timer)
-      // Exit status is not a reliable success signal; the caller re-reads auth.json.
-      resolve({ ok: true, code })
-    })
-  })
+function issuerOf(session) {
+  if (typeof session?.oidcIssuer === 'string' && session.oidcIssuer.startsWith('https://')) return session.oidcIssuer
+  const scope = typeof session?.scope === 'string' ? session.scope : ''
+  const issuer = scope.split('::')[0]
+  if (issuer?.startsWith('https://')) return issuer
+  return XAI_OAUTH_ISSUER
+}
+
+function clientIdOf(session) {
+  if (typeof session?.oidcClientId === 'string' && session.oidcClientId) return session.oidcClientId
+  const scope = typeof session?.scope === 'string' ? session.scope : ''
+  const clientId = scope.split('::')[1]
+  return clientId || GROK_OIDC_CLIENT_ID
 }
 
 /**
- * Default renewal: hand off to the official CLI, then re-read auth.json.
- * Returns the renewed session, or undefined when the CLI is unavailable or the
- * file still holds the old token.
+ * Renew the access token with the refresh token stored in auth.json.
+ * Returns the renewed session, or undefined when the file has no refresh token.
+ * Does not spawn a process.
  */
 async function defaultRenewSession(options = {}) {
   const env = options.env ?? process.env
-  if (!grokCliAvailable(env)) return undefined
-  await spawnGrokRefresh({ env })
-  const parsed = (options.readAuth ?? readGrokAuthSession)()
-  return parsed?.session
+  const path = options.authPath ?? authJsonPath(env)
+  const read = options.readAuth ?? (() => readGrokAuthSession(path))
+  let parsed
+  try {
+    parsed = read()
+  } catch {
+    return undefined
+  }
+  const current = parsed?.session
+  if (!current?.refreshToken) return undefined
+  const issuer = issuerOf(current)
+  const clientId = clientIdOf(current)
+  const fetchImpl = options.fetch ?? fetch
+  const endpoints = options.endpoints ?? await discoverOauthEndpoints(issuer, { fetch: fetchImpl })
+  const nowMs = typeof options.now === 'function' ? options.now() : Date.now()
+  const tokens = await refreshOauthToken({
+    endpoint: endpoints.tokenEndpoint,
+    clientId,
+    refreshToken: current.refreshToken,
+    fetch: fetchImpl,
+    now: () => nowMs,
+  })
+  const written = writeOauthSession(path, {
+    issuer,
+    clientId,
+    accessToken: tokens.accessToken,
+    refreshToken: tokens.refreshToken || current.refreshToken,
+    expiresAt: tokens.expiresAt ?? current.expiresAt,
+    email: current.email,
+    userId: current.userId,
+  })
+  return written.session
 }
 
 async function defaultCredentialRefOf() {
@@ -336,9 +160,21 @@ export function createSessionService({
   storeTokenTimeoutMs = STORE_TOKEN_TIMEOUT_MS,
   credentialsIoTimeoutMs = CREDENTIALS_IO_TIMEOUT_MS,
   credentialRefOf = defaultCredentialRefOf,
-  renewSession = defaultRenewSession,
+  renewSession,
+  fetch: fetchImpl,
+  authPath,
+  env,
+  oauthEndpoints,
   now = () => Date.now(),
 } = {}) {
+  const renew = renewSession ?? (() => defaultRenewSession({
+    readAuth,
+    fetch: fetchImpl,
+    authPath,
+    env,
+    endpoints: oauthEndpoints,
+    now,
+  }))
   let catalog = { models: [], source: 'signed-out', error: undefined }
   let lastPublic = publicSessionView(undefined)
   let lastUsage = unavailableUsage('Not fetched yet')
@@ -383,7 +219,7 @@ export function createSessionService({
 
   /**
    * True when the in-memory token is known to be expired (or about to expire).
-   * An unknown expiry is treated as usable: never force a CLI spawn on a hunch.
+   * An unknown expiry is treated as usable: never refresh on a hunch.
    */
   const memoryTokenNeedsRenewal = () => {
     if (typeof memoryAccessToken !== 'string' || memoryAccessToken.length === 0) return false
@@ -393,14 +229,14 @@ export function createSessionService({
 
   let renewalInFlight
   /**
-   * Ask the official CLI to renew, then re-read auth.json. Concurrent callers
-   * (several sessions hitting the same expired token) share one spawn.
+   * Refresh the access token, then adopt the session auth.json now holds.
+   * Concurrent callers share one refresh.
    */
   const renewAccessToken = async () => {
     if (renewalInFlight) return renewalInFlight
     renewalInFlight = (async () => {
       try {
-        const session = await renewSession()
+        const session = await renew()
         const token = adoptSession(session)
         if (token) notifyCatalogChange()
         return token
@@ -435,9 +271,9 @@ export function createSessionService({
   const readStoredToken = async () => {
     if (typeof memoryAccessToken === 'string' && memoryAccessToken.length > 0) {
       if (!memoryTokenNeedsRenewal()) return memoryAccessToken
-      // Expired in memory: the CLI owns renewal, so let it rewrite auth.json and
-      // re-read. Falling back to the stale token keeps the eventual error a real
-      // 401 rather than a misleading "not signed in".
+      // Expired in memory: refresh via the token endpoint and re-read auth.json.
+      // Falling back to the stale token keeps the eventual error a real 401
+      // rather than a misleading "not signed in".
       const renewed = await renewAccessToken()
       return renewed ?? memoryAccessToken
     }
@@ -557,8 +393,8 @@ export function createSessionService({
         })
       })
       const message = parsed.reason === 'api-key-only'
-        ? 'Found an API-key entry only. Sign in with SuperGrok / X Premium via grok login.'
-        : 'No Grok Build subscription session in auth.json. Run grok login first.'
+        ? 'Found an API-key entry only. Sign in with a SuperGrok / X Premium account.'
+        : 'No Grok Build subscription session in auth.json. Sign in from Settings first.'
       notifyCatalogChange()
       return { ok: false, error: message, account: lastPublic, catalog, usage: lastUsage }
     }
@@ -583,11 +419,13 @@ export function createSessionService({
     return { ok: true, account: lastPublic, catalog, usage: lastUsage }
   }
 
+  const snapshot = () => ({ account: lastPublic, catalog, usage: lastUsage, authPath: authPath ?? authJsonPath(env) })
+
   const status = async () => {
     // Prefer memory / last successful Pull so a slow credentials.resolve cannot
     // force a signed-out flash after an in-process signed-in session.
     if ((typeof memoryAccessToken === 'string' && memoryAccessToken.length > 0) || lastPublic.signedIn === true) {
-      return { account: lastPublic, catalog, usage: lastUsage, cliAvailable: grokCliAvailable(), authPath: authJsonPath() }
+      return snapshot()
     }
 
     // Same spirit as pull: auth.json first (sync), never block Settings on credentials.
@@ -595,7 +433,7 @@ export function createSessionService({
       const parsed = readAuth()
       if (parsed.session) {
         adoptSession(parsed.session)
-        return { account: lastPublic, catalog, usage: lastUsage, cliAvailable: grokCliAvailable(), authPath: authJsonPath() }
+        return snapshot()
       }
     } catch (error) {
       logger?.warn?.(
@@ -615,43 +453,101 @@ export function createSessionService({
       lastPublic = publicSessionView(undefined)
       catalog = { models: [], source: 'signed-out', error: undefined }
       lastUsage = unavailableUsage('Not signed in')
-      return { account: lastPublic, catalog, usage: lastUsage, cliAvailable: grokCliAvailable(), authPath: authJsonPath() }
+      return snapshot()
     }
     memoryAccessToken = token
     lastPublic = Object.freeze({ signedIn: true, maskedAccount: '••••', authMode: 'oidc', source: 'dsh-credentials' })
     // Return cached usage only. Billing is fetched via usage/refresh (or the
     // background post-pull kick) — never on every Settings status load.
-    return { account: lastPublic, catalog, usage: lastUsage, cliAvailable: grokCliAvailable(), authPath: authJsonPath() }
+    return snapshot()
   }
 
-  const login = async options => {
-    const started = await spawnGrokLogin(options)
-    const extra = {
-      ...(started.loginUrl === undefined ? {} : { loginUrl: started.loginUrl }),
-      ...(started.userCode === undefined ? {} : { userCode: started.userCode }),
-      ...(started.warning === undefined ? {} : { warning: started.warning }),
-    }
-    if (started.pending) {
-      // The CLI keeps waiting for the browser round trip (its own budget is
-      // minutes), so answer now and sync when authorization lands instead of
-      // holding the RPC open — the host caps every handler at a few seconds.
-      started.child?.once?.('exit', code => {
-        if (code !== 0) return
-        scheduleDeferred(() => {
-          void pull().catch(error => {
-            logger?.warn?.(
-              'Grok subscription login sync failed: %s',
-              error instanceof Error ? error.message : 'unknown',
-            )
-          })
-        })
+  let loginEpoch = 0
+  const login = async loginOptions => {
+    const epoch = ++loginEpoch
+    const fetchLogin = loginOptions?.fetch ?? fetchImpl ?? fetch
+    const path = loginOptions?.authPath ?? authPath ?? authJsonPath(env)
+    const sleep = loginOptions?.sleep ?? defaultSleep
+    const openUrl = loginOptions?.openUrl ?? (url => openExternal(url, { spawn: loginOptions?.openSpawn }))
+    const clock = () => (typeof loginOptions?.now === 'function' ? loginOptions.now() : now())
+    let endpoints
+    let device
+    try {
+      endpoints = loginOptions?.endpoints ?? oauthEndpoints ?? await discoverOauthEndpoints(XAI_OAUTH_ISSUER, { fetch: fetchLogin })
+      device = await requestDeviceAuthorization({
+        endpoint: endpoints.deviceAuthorizationEndpoint,
+        fetch: fetchLogin,
       })
-      return { ok: true, pending: true, ...extra, ...(await status()) }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not start sign-in'
+      return { ok: false, error: message, ...(await status()) }
     }
-    return { ...(await pull()), pending: false, ...extra }
+    const loginUrl = device.verificationUriComplete || device.verificationUri
+    if (!isXaiHttpsUrl(loginUrl) || !device.userCode || !device.deviceCode) {
+      return { ok: false, error: 'Sign-in did not return a verification link.', ...(await status()) }
+    }
+    try {
+      void openUrl(loginUrl)
+    } catch {
+      // The panel still shows the link.
+    }
+    const deadline = clock() + (typeof device.expiresIn === 'number' && device.expiresIn > 0 ? device.expiresIn : 900) * 1000
+    let interval = Number.isFinite(device.interval) && device.interval >= 0 ? device.interval : 5
+    const poll = async () => {
+      try {
+        while (epoch === loginEpoch) {
+          if (clock() >= deadline) {
+            logger?.warn?.('Grok subscription sign-in timed out before authorization')
+            return
+          }
+          await sleep(interval * 1000)
+          if (epoch !== loginEpoch) return
+          const result = await exchangeDeviceCode({
+            endpoint: endpoints.tokenEndpoint,
+            deviceCode: device.deviceCode,
+            fetch: fetchLogin,
+            now: clock,
+          })
+          if (epoch !== loginEpoch) return
+          if (result.kind === 'pending') continue
+          if (result.kind === 'slow_down') {
+            interval += 5
+            continue
+          }
+          if (result.kind !== 'ok') {
+            logger?.warn?.('Grok subscription sign-in stopped: %s', result.error ?? 'unknown')
+            return
+          }
+          writeOauthSession(path, {
+            issuer: result.issuer,
+            clientId: result.clientId,
+            accessToken: result.accessToken,
+            refreshToken: result.refreshToken,
+            expiresAt: result.expiresAt,
+          })
+          if (epoch !== loginEpoch) return
+          await pull()
+          return
+        }
+      } catch (error) {
+        logger?.warn?.(
+          'Grok subscription sign-in failed: %s',
+          error instanceof Error ? error.message : 'unknown',
+        )
+      } finally {
+        try {
+          loginOptions?.onSettled?.()
+        } catch {
+          // A test hook must not turn into a failed sign-in.
+        }
+      }
+    }
+    void poll()
+    return { ok: true, pending: true, loginUrl, userCode: device.userCode, ...(await status()) }
   }
 
   const logout = async () => {
+    loginEpoch += 1
     memoryAccessToken = undefined
     memorySessionTouched = true
     await clearToken().catch(error => {
@@ -675,7 +571,7 @@ export function createSessionService({
     login,
     logout,
     currentToken: readStoredToken,
-    /** Force a CLI-backed renewal; used when the provider answers 401. */
+    /** Force a refresh-token renewal; used when the provider answers 401. */
     refreshToken: () => renewAccessToken(),
     models: () => catalog.models,
     catalog: () => catalog,

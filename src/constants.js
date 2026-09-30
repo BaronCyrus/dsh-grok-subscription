@@ -24,6 +24,8 @@ export const CLIENT_VERSION_FALLBACK = '1.0.5'
 
 export const API_KEY_SCOPE = 'xai::api_key'
 export const XAI_OAUTH_ISSUER = 'https://auth.x.ai'
+/** Public OIDC client id of the official Grok CLI. Not a secret. */
+export const GROK_OIDC_CLIENT_ID = 'b1a00492-073a-47ea-816f-4c329264a828'
 export const SESSION_AUTH_MODES = Object.freeze(['oidc', 'external', 'web_login', 'grok'])
 export const API_KEY_AUTH_MODES = Object.freeze(['api_key'])
 
@@ -36,7 +38,7 @@ export const STORE_TOKEN_TIMEOUT_MS = 5_000
  * in flight cannot cross the boundary and get a 401.
  */
 export const TOKEN_EXPIRY_SKEW_MS = 120_000
-/** The official CLI needs a moment to start, refresh, and rewrite auth.json. */
+/** Ceiling for one OAuth token request (device poll or refresh). */
 export const CLI_REFRESH_TIMEOUT_MS = 20_000
 export const STREAM_IDLE_TIMEOUT_MS = 10 * 60 * 1000
 export const MAX_REQUEST_IMAGE_BYTES = 20 * 1024 * 1024
@@ -70,9 +72,8 @@ export const CREDENTIALS_IO_TIMEOUT_MS = 1_500
 /** Host-side hard timeout for each Grok subscription RPC handler. */
 export const RPC_HANDLER_TIMEOUT_MS = 8_000
 /**
- * How long `grok login` may take to print its sign-in URL before the RPC answers
- * without one. The CLI keeps running afterwards, so a slow link can still reach
- * the browser; the reply only decides what the panel can show.
+ * How long the sign-in RPC may wait for the device-code endpoint before the
+ * panel answers without a link. Polling continues in the background either way.
  */
 export const LOGIN_START_TIMEOUT_MS = 10_000
 /** Login endpoints answer as soon as the URL is known, so one ceiling covers start + sync. */
