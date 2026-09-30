@@ -56,12 +56,12 @@ jobs:
       - name: Verify committed lib/ matches a fresh build of src/
         run: git diff --exit-code -- lib
       - name: Publish
-        env:
-          # An npm token, even an empty one from setup-node, overrides OIDC.
-          NODE_AUTH_TOKEN: ""
         run: |
           if [ -z "$ACTIONS_ID_TOKEN_REQUEST_URL" ]; then
             echo "GitHub did not provide an OIDC token request URL"
             exit 1
           fi
-          npm publish
+          # Do not set NODE_AUTH_TOKEN at all, even to an empty string.
+          # npm treats a present token variable as token auth and skips OIDC.
+          unset NODE_AUTH_TOKEN
+          npm publish --loglevel verbose
