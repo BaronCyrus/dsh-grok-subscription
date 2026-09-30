@@ -19,7 +19,6 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: '24'
-          registry-url: 'https://registry.npmjs.org'
           package-manager-cache: false
       - name: Require an npm CLI that can use trusted publishing
         run: |
@@ -57,4 +56,12 @@ jobs:
       - name: Verify committed lib/ matches a fresh build of src/
         run: git diff --exit-code -- lib
       - name: Publish
-        run: npm publish
+        env:
+          # An npm token, even an empty one from setup-node, overrides OIDC.
+          NODE_AUTH_TOKEN: ""
+        run: |
+          if [ -z "$ACTIONS_ID_TOKEN_REQUEST_URL" ]; then
+            echo "GitHub did not provide an OIDC token request URL"
+            exit 1
+          fi
+          npm publish
