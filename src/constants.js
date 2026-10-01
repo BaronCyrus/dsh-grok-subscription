@@ -19,8 +19,22 @@ export const CLIENT_IDENTIFIER_HEADER = 'x-grok-client-identifier'
 export const CLIENT_VERSION_HEADER = 'x-grok-client-version'
 /** Official CLI surface reused by this plugin's preferred login path. */
 export const CLIENT_IDENTIFIER = 'grok-shell'
-/** Documented fallback when ~/.grok/version.json is absent. */
-export const CLIENT_VERSION_FALLBACK = '1.0.5'
+/**
+ * Lowest release `POST /v1/responses` accepts in `x-grok-client-version`.
+ * Measured 2026-10-01: `1.0.5` and `1.0.13-rc1` are HTTP 426, every release
+ * at or above `1.0.13` is 200, and nothing is rejected for being ahead of
+ * the CLI. A prerelease does not satisfy the comparison. Catalog and billing
+ * reads are not gated, which is why Settings can look healthy while every
+ * conversation fails.
+ */
+export const CLIENT_VERSION_MINIMUM = '1.0.13'
+/**
+ * Advertised when no CLI release is known, or the one on disk is older than
+ * this. Kept far above CLIENT_VERSION_MINIMUM: the proxy's only failure mode
+ * is a version that is too old, so tracking each CLI release is what goes
+ * stale. `99.0.0` was accepted live on 2026-10-01.
+ */
+export const CLIENT_VERSION_FALLBACK = '99.0.0'
 
 export const API_KEY_SCOPE = 'xai::api_key'
 export const XAI_OAUTH_ISSUER = 'https://auth.x.ai'

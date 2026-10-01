@@ -61,13 +61,13 @@
 <details>
 <summary>确认版本 / 固定版本 / 界面安装失败时的兜底</summary>
 
-**设置 → 插件** 会列出已安装插件与版本，插件自己的 **设置 → Grok 订阅** 页也有版本卡片。要固定版本，在安装框里填入完整的 `包名@版本`，例如 `dsh-grok-subscription@2.0.4`。
+**设置 → 插件** 会列出已安装插件与版本，插件自己的 **设置 → Grok 订阅** 页也有版本卡片。要固定版本，在安装框里填入完整的 `包名@版本`，例如 `dsh-grok-subscription@2.0.5`。
 
 界面安装失败时（例如 profile 目录权限异常），可以对桌面版 profile 手动执行等价操作（pnpm ≥ 11）：
 
 ```sh
 cd "$HOME/.dsh/profiles/desktop"    # Windows: cd "$env:USERPROFILE\.dsh\profiles\desktop"
-pnpm add --save-exact --config.minimumReleaseAge=0 dsh-grok-subscription@2.0.4
+pnpm add --save-exact --config.minimumReleaseAge=0 dsh-grok-subscription@2.0.5
 ```
 
 `dsh plugin --profile desktop …` 会被拒绝：桌面版 profile 由 Electron 应用独占。登录方式与故障排查见 [完整使用指南](docs/guide.zh-CN.md)。
@@ -128,6 +128,8 @@ pnpm add --save-exact --config.minimumReleaseAge=0 dsh-grok-subscription@2.0.4
 **模型列表为空？** 先在设置页完成订阅登录，或点击「读取已保存的会话」。只有 API Key 的条目不等于订阅登录。
 
 **登录或请求超时？** 检查 DSH 所在机器能否连接账号与订阅服务，以及启动环境的代理设置。网络、登录状态和服务端异常都可能导致失败，不要直接认定为额度耗尽。见 [故障排查](docs/guide.zh-CN.md#故障排查)。
+
+**发一条消息就返回 426，说 CLI 版本过旧？** 更新到当前版本并完全重启。设置页和模型列表仍可能正常，因为只有生成接口检查客户端版本。见 [故障排查](docs/guide.zh-CN.md#故障排查)。
 
 **更新后不能带图？** 完整重启桌面应用，检查模型是否在图片支持列表，以及设置页的「运行通路」是否显示**官方 pi-ai** 且附件能力可用。若显示「不可用」，说明宿主缺少 pi-ai 适配器。
 

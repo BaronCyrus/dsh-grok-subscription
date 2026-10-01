@@ -8,7 +8,7 @@
 
 需要 DeepSeek Harness 桌面版，以及当前具有 Grok Build 使用资格的订阅账号。不需要安装 grok 命令。插件的 Node.js 要求为 `^22.19.0 || >=24.0.0`，DSH peer 声明以 [package.json](../package.json) 为准；其中 DSH 依赖使用 `>=0.1.5-rc.2 <0.3.0-0`，覆盖 0.1 与 0.2 全线。声明范围不等于所有版本都已经过实机验证。
 
-**安装：** 在桌面版打开 **设置 → 插件**，在安装输入框里填入包名 `dsh-grok-subscription` 并安装，然后**完全退出并重启桌面应用**。仅刷新页面不会重新加载 Host 中的适配器。需要可重复安装时，填入完整的 `包名@版本`，例如 `dsh-grok-subscription@2.0.4`。
+**安装：** 在桌面版打开 **设置 → 插件**，在安装输入框里填入包名 `dsh-grok-subscription` 并安装，然后**完全退出并重启桌面应用**。仅刷新页面不会重新加载 Host 中的适配器。需要可重复安装时，填入完整的 `包名@版本`，例如 `dsh-grok-subscription@2.0.5`。
 
 **插件依赖宿主自带的 pi-ai 适配器。** 从 2.0.0 起，`grok-build` 路由完全由宿主的 `@deepseek-ai/dsh-llm-pi-ai` / `@earendil-works/pi-ai` 服务；DSH 的任何安装方式都带有它们（`@deepseek-ai/dsh` → `dsh-base` → `dsh-llm-pi-ai`，且 `llm-pi-ai` 行无条件挂载）。这两个包无法从 DSH 安装目录解析时，插件不会注册任何路由，设置页的「运行通路」显示**不可用**。
 
@@ -16,7 +16,7 @@
 
 ```sh
 cd "$HOME/.dsh/profiles/desktop"    # Windows: cd "$env:USERPROFILE\.dsh\profiles\desktop"
-pnpm add --save-exact --config.minimumReleaseAge=0 dsh-grok-subscription@2.0.4
+pnpm add --save-exact --config.minimumReleaseAge=0 dsh-grok-subscription@2.0.5
 ```
 
 `dsh plugin --profile desktop …` 会被直接拒绝：桌面版 profile 由 Electron 应用独占。
@@ -75,6 +75,8 @@ grok-4.6
 
 **聊天或用量返回 `401`。** 自动续期失败时，在设置页重新登录。不要反复粘贴旧 token。
 
+**对话返回 HTTP 426，提示 Grok CLI 版本过旧。** 生成接口（`POST /v1/responses`）要求 `x-grok-client-version` 不低于 `1.0.13`。模型目录和额度接口不检查这项，所以设置页、模型列表和用量卡片可以一切正常，只有发消息失败。`2.0.4` 及更早在没有 grok 命令、也读不到 `~/.grok/version.json` 时会声明 `1.0.5`。当前版本在没有不低于内置回退值的 CLI 正式版本时，改发该回退值（高于已公布的下限；`1.0.13-rc1` 这类预发布号不算）。过旧的 `version.json` 不会再把请求头拉低。仍要自己指定时，在**启动 DSH 的进程环境**里设置 `DSH_GROK_CLIENT_VERSION`（`MAJOR.MINOR.PATCH` 正式版本，且不低于 `1.0.13`），然后完全重启。不要写进 `~/.dsh/.env`：`DSH_*` 会被启动层拒绝。
+
 **图片被拒绝。** 对照图片支持列表，确认设置页「运行通路」显示**官方 pi-ai** 且附件能力可用，并在更新后完整重启桌面应用。
 
 **文件权限错误。** 检查 auth 文件的真实路径、所有者、是否为符号链接以及权限；`chmod 600` 仅解决权限位问题。
@@ -93,7 +95,7 @@ grok-4.6
 
 ```sh
 cd "$HOME/.dsh/profiles/desktop"    # Windows: cd "$env:USERPROFILE\.dsh\profiles\desktop"
-pnpm add --save-exact --config.minimumReleaseAge=0 dsh-grok-subscription@2.0.4
+pnpm add --save-exact --config.minimumReleaseAge=0 dsh-grok-subscription@2.0.5
 ```
 
 然后完全退出并重启桌面版。更新成功后该 profile 的 `package.json` 里依赖应变为目标版本，`dsh.profile.bundles` 条目保持不变。仅刷新网页不够：Host 未重启时仍会加载旧版本。

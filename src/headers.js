@@ -21,19 +21,37 @@ export function parseClientVersion(document) {
   return undefined
 }
 
+/** True when `version` is a release (not a prerelease) at or above `minimum`. */
+export function releaseAtLeast(version, minimum) {
+  const parse = value => {
+    const match = /^v?(\d+)\.(\d+)\.(\d+)$/.exec(typeof value === 'string' ? value.trim() : '')
+    return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : undefined
+  }
+  const left = parse(version)
+  const right = parse(minimum)
+  if (!left || !right) return false
+  for (let index = 0; index < 3; index += 1) {
+    if (left[index] !== right[index]) return left[index] > right[index]
+  }
+  return true
+}
+
 export function readClientVersion(env = process.env, options = {}) {
   if (typeof env.DSH_GROK_CLIENT_VERSION === 'string' && env.DSH_GROK_CLIENT_VERSION.trim()) {
     return env.DSH_GROK_CLIENT_VERSION.trim()
   }
+  const fallback = options.fallback ?? CLIENT_VERSION_FALLBACK
   const path = options.path ?? versionJsonPath(env)
   const exists = options.exists ?? existsSync
   const read = options.read ?? (target => readFileSync(target, 'utf8'))
-  if (!exists(path)) return CLIENT_VERSION_FALLBACK
+  if (!exists(path)) return fallback
   try {
     const parsed = parseClientVersion(JSON.parse(read(path)))
-    return parsed ?? CLIENT_VERSION_FALLBACK
+    // Never advertise a version older than the fallback. The proxy rejects
+    // only versions that are too old, including a stale CLI version.json.
+    return parsed && releaseAtLeast(parsed, fallback) ? parsed : fallback
   } catch {
-    return CLIENT_VERSION_FALLBACK
+    return fallback
   }
 }
 

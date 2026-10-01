@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.0.5 — 2026-10-01
+
+- Fix **every conversation failing with HTTP 426** once the subscription proxy started requiring `x-grok-client-version` `1.0.13` or later. On a machine with no grok CLI — the normal case since 2.0.4 — the plugin advertised the hardcoded `1.0.5`, and `POST /v1/responses` answered `Your Grok CLI version (1.0.5) is outdated`. Settings, the model list and the quota card kept working, because `GET /v1/models-v2` and `GET /v1/billing` are not gated. Fixes #1.
+- The value sent when no current CLI release is known is now `99.0.0`. Measured against the live proxy on 2026-10-01, the check is a **minimum with no upper bound**: `1.0.5` and the prerelease `1.0.13-rc1` are 426, and `1.0.13`, `1.0.14`, `1.1.0`, `2.0.0` and `99.0.0` are 200. A fallback can only be too old, which is the failure this release hit, so it stays far ahead of the published minimum instead of tracking each CLI release. `User-Agent` remains `grok-shell/` plus the same version.
+- A `version.json` that is missing, unreadable, not a `MAJOR.MINOR.PATCH` release, or older than the fallback no longer lowers the header. A release at or above the fallback is still advertised. `DSH_GROK_CLIENT_VERSION` still wins exactly as set, including a value the proxy would reject.
+- That override cannot live in `~/.dsh/.env`. `dsh-app-boot` refuses every `DSH_`-prefixed name, so it has to be exported in the environment that launches DSH, followed by a full restart. Both guides now have a troubleshooting row for the 426.
+
 ## 2.0.4 — 2026-09-30
 
 - **Sign-in and renewal no longer run the grok command.** Settings requests a device code from `https://auth.x.ai`, shows the link and one-time code, and writes the session into `${GROK_HOME:-~/.grok}/auth.json` after the browser confirms it. A token near expiry is renewed with the refresh token at the same token endpoint. The official CLI binary is not required, and an `auth.json` already written by `grok login` can still be loaded with **Read saved session**.

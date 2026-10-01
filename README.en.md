@@ -61,13 +61,13 @@ Pick a Grok model your account can use, adjust reasoning effort as needed, and s
 <details>
 <summary>Check the version / pin one / fall back when the UI install fails</summary>
 
-**Settings → Plugins** lists the installed plugins and their versions, and the plugin's own **Settings → Grok Subscription** page shows a version card. To pin a version, put the full `package@version` in the install field, for example `dsh-grok-subscription@2.0.4`.
+**Settings → Plugins** lists the installed plugins and their versions, and the plugin's own **Settings → Grok Subscription** page shows a version card. To pin a version, put the full `package@version` in the install field, for example `dsh-grok-subscription@2.0.5`.
 
 If the UI install fails (an unusual profile directory, say), the equivalent runs against the desktop profile itself (pnpm ≥ 11):
 
 ```sh
 cd "$HOME/.dsh/profiles/desktop"    # Windows: cd "$env:USERPROFILE\.dsh\profiles\desktop"
-pnpm add --save-exact --config.minimumReleaseAge=0 dsh-grok-subscription@2.0.4
+pnpm add --save-exact --config.minimumReleaseAge=0 dsh-grok-subscription@2.0.5
 ```
 
 `dsh plugin --profile desktop …` is refused: the Electron application owns that profile exclusively. Sign-in and troubleshooting are in the [full user guide](docs/guide.en.md).
@@ -132,6 +132,8 @@ Restart DSH afterwards. Removal does not delete other plugins, the whole profile
 **Empty model list?** Sign in from Settings, or select **Read saved session**. An API-key-only entry is not a subscription login.
 
 **Sign-in or requests time out?** Check connectivity from the DSH host to account and subscription services, including its launch-time proxy settings. Network issues, authentication, or service errors can cause failures; do not assume the quota is exhausted. See [Troubleshooting](docs/guide.en.md#troubleshooting).
+
+**A message fails with HTTP 426 and says the CLI is outdated?** Update to the current release and restart completely. Settings and the model list can still look healthy, because only generation checks the client version. See [Troubleshooting](docs/guide.en.md#troubleshooting).
 
 **Images still unavailable after updating?** Fully restart the desktop app, check the model's image support, and check that **Active path** in Settings reads **official pi-ai** with attachment capability available. An **unavailable** row means the host has no pi-ai adapter.
 

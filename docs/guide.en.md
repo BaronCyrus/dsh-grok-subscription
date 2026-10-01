@@ -8,7 +8,7 @@ For quick setup, see the [README](../README.en.md#install). This guide covers de
 
 You need the DeepSeek Harness desktop app and an account with Grok Build access. The grok command is not required. The plugin declares Node.js `^22.19.0 || >=24.0.0`; DSH peers use `>=0.1.5-rc.2 <0.3.0-0`, which spans the whole 0.1 and 0.2 lines. See [package.json](../package.json) for the full requirements. Declared compatibility is not a claim that every version has passed live verification.
 
-**Install:** in the desktop app open **Settings → Plugins**, type the package name `dsh-grok-subscription` into the install field, and install it. Then **quit and restart the desktop app completely**; refreshing the page alone does not reload the Host adapter. To pin a version, put the full `package@version` in that field, for example `dsh-grok-subscription@2.0.4`.
+**Install:** in the desktop app open **Settings → Plugins**, type the package name `dsh-grok-subscription` into the install field, and install it. Then **quit and restart the desktop app completely**; refreshing the page alone does not reload the Host adapter. To pin a version, put the full `package@version` in that field, for example `dsh-grok-subscription@2.0.5`.
 
 **The plugin depends on the host's own pi-ai adapter.** From 2.0.0 the `grok-build` route is served entirely by the host's `@deepseek-ai/dsh-llm-pi-ai` / `@earendil-works/pi-ai`, which every DSH installation carries (`@deepseek-ai/dsh` → `dsh-base` → `dsh-llm-pi-ai`, with the `llm-pi-ai` row mounted unconditionally). If those packages cannot be resolved from the DSH installation, the plugin registers no route at all and **Active path** in Settings reads **unavailable**.
 
@@ -16,7 +16,7 @@ If the UI install fails (an unusual profile directory, say), the equivalent runs
 
 ```sh
 cd "$HOME/.dsh/profiles/desktop"    # Windows: cd "$env:USERPROFILE\.dsh\profiles\desktop"
-pnpm add --save-exact --config.minimumReleaseAge=0 dsh-grok-subscription@2.0.4
+pnpm add --save-exact --config.minimumReleaseAge=0 dsh-grok-subscription@2.0.5
 ```
 
 `dsh plugin --profile desktop …` is refused: the Electron application owns that profile exclusively.
@@ -75,6 +75,8 @@ For prefix caching, the plugin pins one stable `prompt_cache_key` per DSH sessio
 
 **Chat or usage returns `401`.** If automatic renewal fails, sign in again from Settings. Do not repeatedly paste an old token.
 
+**Chat returns HTTP 426 saying the Grok CLI is outdated.** Generation (`POST /v1/responses`) requires `x-grok-client-version` of at least `1.0.13`. The model catalog and billing endpoints are not checked, so Settings, the model list and the quota card can look fine while every message fails. `2.0.4` and earlier advertised `1.0.5` when the grok command was absent and `~/.grok/version.json` could not be read. Current releases advertise the built-in fallback — a release above that published minimum; a prerelease such as `1.0.13-rc1` does not count — unless an installed CLI `version.json` is itself a release at least that high. A stale `version.json` no longer pulls the header back down. To pin it yourself, set `DSH_GROK_CLIENT_VERSION` in the **environment that launches DSH** (a `MAJOR.MINOR.PATCH` release, at least `1.0.13`) and restart completely. Do not put it in `~/.dsh/.env`: names with the `DSH_` prefix are refused by the bootstrap layer.
+
 **Images rejected.** Check the supported IDs, confirm **Active path** reads **official pi-ai** with attachment capability available, and fully restart the desktop app after updating.
 
 **Auth-file permission error.** Check the actual path, owner, symlink status, and permissions. `chmod 600` fixes permission bits only.
@@ -93,7 +95,7 @@ In the desktop app the `desktop` profile is owned exclusively by the Electron ap
 
 ```sh
 cd "$HOME/.dsh/profiles/desktop"    # Windows: cd "$env:USERPROFILE\.dsh\profiles\desktop"
-pnpm add --save-exact --config.minimumReleaseAge=0 dsh-grok-subscription@2.0.4
+pnpm add --save-exact --config.minimumReleaseAge=0 dsh-grok-subscription@2.0.5
 ```
 
 Then quit and restart the desktop app completely. After a successful update the profile's `package.json` dependency should show the target version while its `dsh.profile.bundles` entry is unchanged. Refreshing the browser is not enough: without a Host restart the old version keeps loading.
