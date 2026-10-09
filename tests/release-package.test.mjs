@@ -18,6 +18,24 @@ test('release manifest, lockfile, and localized Settings versions agree', async 
   assert.ok((await read('CHANGELOG.md')).includes(`## ${manifest.version}`))
 })
 
+test('plugin display metadata is localized, exported, and packaged without renaming the npm identity', async () => {
+  const manifest = JSON.parse(await read('package.json'))
+  assert.equal(manifest.name, 'dsh-grok-subscription')
+  assert.equal(manifest.exports['./locale/*.json'], './locale/*.json', 'DSH must resolve package-level locale resources')
+  assert.ok(manifest.files.includes('locale/*.json'), 'publish files must include both locale resources')
+
+  for (const [language, title] of [['en', 'Grok Subscription'], ['zh-CN', 'Grok 订阅']]) {
+    const path = `locale/${language}.json`
+    assert.equal(import.meta.resolve(`${manifest.name}/${path}`), new URL(`../${path}`, import.meta.url).href)
+    const { meta } = JSON.parse(await read(path))
+    assert.deepEqual(Object.keys(meta).sort(), ['description', 'title'])
+    assert.equal(meta.title, title)
+    assert.equal(typeof meta.description, 'string')
+    assert.ok(meta.description.trim().length > 0)
+    if (language === 'en') assert.equal(meta.description, manifest.description)
+  }
+})
+
 test('plugin card icon is declared, packaged, and within the host byte limit', async () => {
   const manifest = JSON.parse(await read('package.json'))
   assert.equal(manifest.icon, './icon-subscription.webp', 'DSH reads the top-level icon field')

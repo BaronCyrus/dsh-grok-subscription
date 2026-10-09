@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.0.7 — 2026-10-09
+
+- Give the installed plugin card a localized display name: **Grok Subscription** in English and **Grok 订阅** in Simplified Chinese. Export and ship package-level `locale/en.json` and `locale/zh-CN.json` with `meta.title` and `meta.description`, the same metadata contract used by DSH. The npm package name remains `dsh-grok-subscription`.
+- Add release regression checks for both localized metadata resources, their exported paths and publish inclusion. Keep the lockfile, Settings version labels, and pinned installation examples aligned with 2.0.7.
+- No authentication, model-routing, image-input, quota, icon, or dependency changes. Update the plugin and fully restart DSH to reload the installed metadata.
+
 ## 2.0.6 — 2026-10-09
 
 - Show the existing Comet Navigator mascot on the installed plugin card. The package now declares a top-level `icon` and ships a dedicated 512×512 transparent, lossless WebP (192,186 bytes), below DSH's 256 KiB icon limit. The original README PNG is retained unchanged.
