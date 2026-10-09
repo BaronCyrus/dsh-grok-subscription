@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.0.6 — 2026-10-09
+
+- Show the existing Comet Navigator mascot on the installed plugin card. The package now declares a top-level `icon` and ships a dedicated 512×512 transparent, lossless WebP (192,186 bytes), below DSH's 256 KiB icon limit. The original README PNG is retained unchanged.
+- Add release regression checks for the icon declaration, exported manifest, packaged asset, WebP signature, and host byte limit. Keep localized version labels, the lockfile, and pinned installation examples aligned with 2.0.6.
+- No authentication, model-routing, image-input, quota, or dependency changes. Update the plugin and fully restart DSH to reload the installed package metadata.
+
 ## 2.0.5 — 2026-10-01
 
 - Fix **every conversation failing with HTTP 426** once the subscription proxy started requiring `x-grok-client-version` `1.0.13` or later. On a machine with no grok CLI — the normal case since 2.0.4 — the plugin advertised the hardcoded `1.0.5`, and `POST /v1/responses` answered `Your Grok CLI version (1.0.5) is outdated`. Settings, the model list and the quota card kept working, because `GET /v1/models-v2` and `GET /v1/billing` are not gated. Fixes #1.

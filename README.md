@@ -61,13 +61,13 @@
 <details>
 <summary>确认版本 / 固定版本 / 界面安装失败时的兜底</summary>
 
-**设置 → 插件** 会列出已安装插件与版本，插件自己的 **设置 → Grok 订阅** 页也有版本卡片。要固定版本，在安装框里填入完整的 `包名@版本`，例如 `dsh-grok-subscription@2.0.5`。
+**设置 → 插件** 会列出已安装插件与版本，插件自己的 **设置 → Grok 订阅** 页也有版本卡片。要固定版本，在安装框里填入完整的 `包名@版本`，例如 `dsh-grok-subscription@2.0.6`。
 
 界面安装失败时（例如 profile 目录权限异常），可以对桌面版 profile 手动执行等价操作（pnpm ≥ 11）：
 
 ```sh
 cd "$HOME/.dsh/profiles/desktop"    # Windows: cd "$env:USERPROFILE\.dsh\profiles\desktop"
-pnpm add --save-exact --config.minimumReleaseAge=0 dsh-grok-subscription@2.0.5
+pnpm add --save-exact --config.minimumReleaseAge=0 dsh-grok-subscription@2.0.6
 ```
 
 `dsh plugin --profile desktop …` 会被拒绝：桌面版 profile 由 Electron 应用独占。登录方式与故障排查见 [完整使用指南](docs/guide.zh-CN.md)。
